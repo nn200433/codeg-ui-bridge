@@ -1,5 +1,5 @@
 {
-  "name": "@pi-ui-bridge/browser-extension",
+  "name": "@codeg-ui-bridge/browser-extension",
   "version": "0.1.0",
   "private": true,
   "type": "module",

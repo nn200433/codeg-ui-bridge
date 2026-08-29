@@ -1,312 +1,127 @@
-# Pi UI Bridge
+# Codeg UI Bridge
 
-[中文说明](./README.zh-CN.md)
+Codeg UI Bridge 是一个浏览器与 [Codeg](https://github.com/xintaofei/codeg) 之间的 UI-to-code bridge。
 
-Pi UI Bridge is a local UI-to-code bridge for `pi-coding-agent`.
+它可以让你：
 
-It lets you:
+- 在浏览器里直接选中真实页面元素
+- 输入你希望的 UI 修改需求
+- 把结构化页面上下文通过 Codeg Web 服务发给任意 ACP 智能体（默认 `pi`）
+- 基于 source binder 元信息把页面节点绑定回代码位置
+- 在页面面板里实时看到智能体的流式回复、工具调用，并可随时停止
 
-- select real elements directly in the browser
-- describe the change you want
-- send structured UI context to the current Pi session
-- use source metadata to connect page nodes back to code
-
-## What it is for
-
-Pi UI Bridge is designed for local development workflows where you want browser-side UI selection and source-code editing to work together.
-
-Instead of copying prompts manually, you can select an element on the page and send the request to Pi with structured metadata.
-
-## Current capabilities
-
-- local Pi extension with bridge server
-- browser extension popup for connection setup
-- browser overlay with:
-  - selection mode
-  - element highlighting
-  - inline composer near the selected element
-  - draggable control panel
-  - draggable DOM modal
-  - simplified DOM explorer
-  - Chinese / English UI switching
-- React + Vite source binder package
-- example React demo project
-
-## Repository structure
+## 架构
 
 ```text
-docs/                    architecture, ADRs, guides, issues, PR notes
-extensions/              Pi extension entry
-skills/                  Pi skill
-packages/                reusable packages
-examples/                runnable examples
+浏览器扩展（content overlay + MV3 background）
+   │  HTTP:  POST http://{ip}:{port}/api/<command>   Authorization: Bearer <token>
+   │  WS:    ws://{ip}:{port}/ws/events              子协议: codeg-events + codeg-token.<base64url(token)>
+   ▼
+Codeg Web 服务（桌面应用内置或独立 codeg-server）
+   │  acp_connect 拉起 ACP 子进程
+   ▼
+pi / claude_code / codex / gemini / ... 任意 Agent CLI
 ```
 
-## Main commands
+本仓库不包含任何智能体宿主逻辑：扩展直连 Codeg 的 Web 服务，Codeg 负责拉起并管理智能体进程。
 
-After loading the local extension in Pi, these commands are available:
-
-- `/pi-ui:start`
-- `/pi-ui:stop`
-- `/pi-ui:status`
-- `/pi-ui:last`
-
-## HTTP endpoints
-
-- `GET /health`
-- `POST /attach`
-- `POST /selection`
-- `POST /apply`
-- `GET /state`
-
-## Documentation
-
-- [Chinese guide](./README.zh-CN.md)
-- [Local testing guide](./docs/guides/20260320-local-testing.md)
-- [Architecture](./docs/architecture/20260320-pi-ui-bridge-v0.1.md)
-- [Project structure guide](./docs/guides/20260320-project-structure.md)
-
-## Built-in skills
-
-This repository includes Pi skills that other agents can load directly:
-
-- `/skill:manage-pi-ui-bridge` — install, update, uninstall in Pi
-- `/skill:setup-pi-ui-bridge` — full setup, browser extension, and local connection flow
-- `/skill:pi-ui-refactor` — handle browser-originated UI-to-code requests
-
-## Quick start
-
-### Option A. Ask Pi to install it via skill
-
-If you are already inside Pi, you can let Pi follow this repository skill:
+## 仓库结构
 
 ```text
-/skill:manage-pi-ui-bridge
+packages/bridge-core          Codeg HTTP/WS 客户端封装 + prompt 构建 + 协议类型
+packages/browser-extension    Chrome 扩展（popup / background / overlay）
+packages/source-binder-react  Vite 插件，为 JSX 元素注入源码定位属性
+packages/ui-runtime           预留：DOM 扫描与运行时模型
+packages/intent-engine        预留：move / resize / describe 意图模型
+examples/react-vite-demo      可运行的 React 演示项目
+docs/                         架构、ADR、指南、历史 issue 记录
 ```
 
-Then ask Pi to install or uninstall Pi UI Bridge for you.
+## 前置要求
 
-### Option B. Install into Pi manually, then use plain `pi`
+1. 一个正在运行的 Codeg Web 服务（桌面应用开启 Web 服务，或独立部署的 `codeg-server`）
+   - 默认地址按 `http://127.0.0.1:23080` 配置，IP、端口、Token 全部在扩展 popup 中填写
+2. Codeg 中至少一个可用的 ACP 智能体（推荐 `pi`，需本机已安装对应 CLI）
+3. Chrome / Edge 浏览器
 
-```bash
-cd pi-ui-bridge
-pnpm install
-pnpm install:pi
-```
-
-This syncs the project into `~/.pi/agent/pi-ui-bridge` and updates `~/.pi/agent/settings.json` to load that installed copy.
-
-Then just start Pi normally:
-
-```bash
-pi
-```
-
-Inside Pi:
-
-```text
-/pi-ui:start
-```
-
-### Update an existing install
-
-After pulling new changes from GitHub, run:
+## 快速开始
 
 ```bash
 pnpm install
-pnpm install:pi
-```
-
-### Uninstall from Pi
-
-```bash
-pnpm uninstall:pi
-```
-
-### Option B. Temporary dev mode with `-e`
-
-```bash
-cd pi-ui-bridge
-pi -e ./extensions/pi-ui-bridge/index.ts
-```
-
-### Start the bridge
-
-Inside Pi:
-
-```text
-/pi-ui:start
-```
-
-This prints:
-
-- `bridgeUrl`
-- `token`
-- next-step instructions
-
-### 3. Build and load the browser extension
-
-```bash
 pnpm build:browser-extension
 ```
 
-Load this directory in Chrome:
+1. 在 Chrome `chrome://extensions` 开发者模式中加载 `packages/browser-extension/dist`
+2. 打开目标页面，点击扩展图标
+3. 填写 Codeg IP、端口、Token，点击「测试连接」确认版本号
+4. 选择该页面所属的项目（Codeg 文件夹下拉，或手动输入项目路径）
+5. 选择用于修改开发的智能体（默认 `pi`）
+6. 点击「连接页面」——页面右上方出现 overlay 面板
+7. 开启选择模式，点击目标元素，在 inline 输入框或面板中输入需求并发送
 
-```text
-packages/browser-extension/dist
-```
+发送后，面板的「执行流」区域会通过 WebSocket 实时显示：
 
-### 4. Connect the current page from the popup
+- 智能体的流式回复与思考摘要（默认折叠）
+- 工具调用卡片（标题、状态、输出）
+- 权限确认 / 智能体提问 / 计划确认卡片，可直接在面板中点击回应
+- 完成或出错状态，执行中可点击「停止」中断当前轮次
 
-In the extension popup:
+popup 会按页面 origin 记住「项目 + 智能体」组合，同一站点下次自动预填。
 
-- paste `bridgeUrl`
-- paste `token`
-- click connect page
+## 与 Codeg 的接口对接
 
-### 5. Start the example React demo (optional)
+所有命令均为 `POST /api/<command>`，鉴权头 `Authorization: Bearer <token>`，事件通过 `GET /ws/events` 的 attach 协议推送：
+
+| 命令 | 用途 |
+| --- | --- |
+| `health` | 连接测试，返回 Codeg 版本 |
+| `acp_list_agents` | 拉取可用智能体列表 |
+| `list_all_folder_details` | 拉取项目（文件夹）列表 |
+| `open_folder` | 手动输入路径时登记项目 |
+| `acp_connect` | 按 `agentType + workingDir` 拉起会话，返回 connection id |
+| `acp_prompt` | 发送结构化 UI 修改请求 |
+| `acp_cancel` | 停止当前轮次 |
+| `acp_respond_permission` / `acp_answer_question` / `acp_answer_plan_approval` | 回应智能体的交互请求 |
+| `acp_get_session_snapshot` | 获取会话状态与外部 session id |
+| `acp_touch_connection` | 保活（Codeg 默认 60s 回收空闲连接） |
+
+客户端封装集中在 [`packages/bridge-core/src/codeg-api.ts`](./packages/bridge-core/src/codeg-api.ts)。
+
+### 断线与恢复
+
+- WebSocket 断开后按指数退避自动重连，重连时携带 `since_seq` 补齐漏掉的事件
+- 连接被 Codeg 空闲回收后，下次发送会自动重连，并通过已记录的外部 session id 恢复会话历史
+
+## 源码绑定
+
+React + Vite 项目接入 [`packages/source-binder-react`](./packages/source-binder-react) 后，开发模式下每个 JSX 元素会带上：
+
+- `data-codeg-source-id`
+- `data-codeg-source-file`
+- `data-codeg-source-line`
+- `data-codeg-source-column`
+- `data-codeg-component`
+
+选中元素后，发送给智能体的请求会自动包含 `sourceHint`（文件、行号、组件名），智能体可以精确定位源码。使用方式见 [source-binder-react README](./packages/source-binder-react/README.md)。
+
+## 本地演示
 
 ```bash
 pnpm dev:react-demo
 ```
 
-### 6. Select an element and send a request
+启动 [examples/react-vite-demo](./examples/react-vite-demo) 后连接该页面即可验证完整链路。
 
-On the page:
+## 当前限制
 
-- enable selection mode
-- click an element
-- use the inline composer below the element
-- enter your request
-- click send
+- 面向本地 / 内网 Codeg 服务，未做公网穿透场景优化
+- Token 保存在浏览器 `chrome.storage.local`，请勿在共用机器上明文留存
+- source binder 目前只覆盖 React + Vite 开发模式
+- 图片等多媒体上下文暂未接入（Codeg 支持经 `upload_attachment` 上传后引用）
 
-Pi should receive a structured browser request in the current session.
+## 设计文档
 
-## Source binding
-
-The React source binder injects these attributes in development mode:
-
-- `data-pi-source-id`
-- `data-pi-source-file`
-- `data-pi-source-line`
-- `data-pi-source-column`
-- `data-pi-component`
-
-When those attributes exist, the browser overlay includes `sourceHint` in selection and apply requests.
-
-## Browser workflow overview
-
-### Popup
-
-Use the popup to:
-
-- configure `bridgeUrl`
-- configure `token`
-- connect the current page
-- see the current browser session id and page binding state
-
-### Main overlay panel
-
-Use the main panel to:
-
-- switch selection mode on or off
-- switch language between Chinese and English
-- inspect current selection summary
-- inspect source binding summary
-- open the DOM modal
-- copy JSON or source references
-
-### Inline composer
-
-After selecting an element, an inline composer appears near the element.
-
-Use it to:
-
-- type a change request in place
-- send the request directly to Pi
-- open the DOM modal without returning to the main panel
-
-### DOM modal
-
-The DOM view is opened in a separate draggable modal so the main panel stays compact.
-
-It includes:
-
-- ancestor path chips
-- current node card
-- child preview
-- simplified tree block
-- click-to-select navigation
-
-## Detailed operation guide
-
-### Start Pi UI Bridge
-
-1. open a terminal in the project root
-2. start Pi with the extension
-3. run `/pi-ui:start`
-4. copy the `bridgeUrl` and `token`
-
-### Connect the browser page
-
-1. load the built browser extension in Chrome
-2. open the extension popup
-3. paste `bridgeUrl`
-4. paste `token`
-5. click connect page
-6. refresh the target page
-
-### Select elements safely
-
-When selection mode is enabled:
-
-- page click events are blocked
-- business buttons and links do not execute
-- hover highlights show the promoted target
-- click selection uses promoted selection logic for more useful containers
-
-### Send requests to Pi
-
-1. click a target element
-2. review the selected element summary
-3. type the requested change in the inline composer
-4. click send
-5. Pi receives the request in the current session
-
-### Inspect DOM structure
-
-1. click `DOM`
-2. use ancestor path chips to jump to parent containers
-3. use child preview to jump to child nodes
-4. use the simplified tree block when you need more structure
-
-### Inspect source hints
-
-If the selected node has source metadata, the UI shows:
-
-- source file
-- line
-- component
-- source id
-
-You can then:
-
-- copy source
-- copy JSON
-- locate source
-
-## Current limitations
-
-- focused on local development only
-- React + Vite first
-- source binder currently targets development mode
-- selection and DOM exploration are optimized for compact browser workflows, not full DevTools replacement
-
-## Status
-
-This repository already includes a working v0.1 foundation, but there is still room for iteration in:
-
-- smarter source binding
-- richer agent-side workflows
-- stronger framework support
-- production-grade browser UX polish
+- [ADR-002 直连 Codeg](./docs/adr/20260829-002-codeg-direct-connection.md)
+- [架构说明 v0.2](./docs/architecture/20260829-codeg-direct-connection-v0.2.md)
+- [本地测试指南](./docs/guides/20260320-local-testing.md)
+- [项目结构指南](./docs/guides/20260320-project-structure.md)

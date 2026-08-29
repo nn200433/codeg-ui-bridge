@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Pi UI Bridge",
+  "name": "Codeg UI Bridge",
   "version": "0.1.0",
-  "description": "Select page elements and send structured UI requests to local pi bridge",
+  "description": "Select page elements and send structured UI requests to local Codeg bridge",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -17,7 +17,7 @@
     }
   ],
   "action": {
-    "default_title": "Pi UI Bridge",
+    "default_title": "Codeg UI Bridge",
     "default_popup": "popup.html"
   }
 }

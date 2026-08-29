@@ -1,10 +1,18 @@
 import { MESSAGE_TYPES } from "./messages";
-import type { BridgeRuntime, ContentSelection, ContentSourceHint, RuntimeResponse } from "./messages";
+import type {
+  AgentStreamEvent,
+  BridgeRuntime,
+  CodegQuestionSpec,
+  ContentAgentEventMessage,
+  ContentSelection,
+  ContentSourceHint,
+  RuntimeResponse
+} from "./messages";
 
 declare global {
   interface Window {
-    __PI_UI_BRIDGE_CONTENT_BOOTED__?: boolean;
-    __PI_UI_BRIDGE_LAST_SELECTION__?: {
+    __CODEG_UI_BRIDGE_CONTENT_BOOTED__?: boolean;
+    __CODEG_UI_BRIDGE_LAST_SELECTION__?: {
       pageUrl: string;
       selection: ContentSelection;
       sourceHint?: ContentSourceHint;
@@ -13,6 +21,18 @@ declare global {
 }
 
 type Locale = "zh-CN" | "en-US";
+
+type StreamItem =
+  | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
+  | { type: "tool"; toolCallId: string; title: string; status: string; content: string };
+
+type PendingPermission = { requestId: string; title?: string; options: { optionId: string; name: string }[] };
+type PendingQuestion = { questionId: string; questions: CodegQuestionSpec[] };
+type PendingPlan = { approvalId: string; planMarkdown: string };
+
+const STREAM_MAX_ITEMS = 80;
+const STREAM_TEXT_MAX_CHARS = 24_000;
 
 type PanelState = {
   collapsed: boolean;
@@ -32,6 +52,12 @@ type PanelState = {
   modalX: number;
   modalY: number;
   locale: Locale;
+  stream: StreamItem[];
+  turnState: "idle" | "running" | "complete" | "error";
+  turnNote: string;
+  pendingPermission: PendingPermission | null;
+  pendingQuestion: PendingQuestion | null;
+  pendingPlan: PendingPlan | null;
 };
 
 type DragState = {
@@ -46,8 +72,8 @@ const PANEL_WIDTH = 392;
 const COMPOSER_WIDTH = 360;
 const PANEL_MARGIN = 16;
 const CHILD_PREVIEW_COUNT = 6;
-const HOST_ID = "pi-ui-bridge-overlay-host";
-const PANEL_POSITION_STORAGE_KEY = "pi-ui-bridge.panel-position";
+const HOST_ID = "codeg-ui-bridge-overlay-host";
+const PANEL_POSITION_STORAGE_KEY = "codeg-ui-bridge.panel-position";
 const DIALOG_LIKE_SELECTOR = '[role="dialog"], [aria-modal="true"], dialog, .el-dialog, .ant-modal, .ant-modal-root, .el-overlay, .el-drawer, .van-popup, .MuiModal-root, .MuiDialog-root';
 const TEXT_LIKE_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "P", "SPAN", "STRONG", "EM", "SMALL"]);
 const SELF_STABLE_TAGS = new Set(["BUTTON", "A", "INPUT", "TEXTAREA", "SELECT", "LABEL", "IMG", "VIDEO", "CANVAS"]);
@@ -68,8 +94,8 @@ const TEST_ATTRIBUTE_NAMES = [
 
 const STRINGS: Record<Locale, Record<string, string>> = {
   "zh-CN": {
-    title: "Pi UI Bridge",
-    subtitle: "选中页面元素后直接发给 Pi",
+    title: "Codeg UI Bridge",
+    subtitle: "选中页面元素后直接发给 Codeg",
     collapse: "收",
     expand: "开",
     locale: "EN",
@@ -94,7 +120,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     noChildren: "没有可展示的子节点",
     promptPlaceholder: "在元素下方输入修改需求",
     hintTree: "点击祖先或子节点可直接切换目标",
-    waiting: "等待连接 Pi Bridge",
+    waiting: "等待连接 Codeg",
     notConnected: "当前页面未连接，请先在 popup 中连接页面",
     connectedPrefix: "已连接",
     selectedRecorded: "已记录选中元素",
@@ -104,8 +130,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     sourceMissing: "当前选中元素没有 sourceHint",
     noElement: "请先点击页面中的目标元素",
     noPrompt: "请先输入修改需求",
-    sending: "正在发送到 Pi...",
-    sentPrefix: "已发送到 Pi，请求号",
+    sending: "正在发送到 Codeg...",
+    sentPrefix: "已发送到 Codeg，请求号",
     copiedJson: "已复制当前 selection JSON",
     copiedSource: "已复制 source",
     copiedLocate: "已复制源码定位",
@@ -123,11 +149,26 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     modalClose: "关闭",
     inlineSend: "发送",
     inlineOpen: "展开面板",
-    promptOpen: "直接输入"
+    promptOpen: "直接输入",
+    stream: "执行流",
+    streamIdle: "尚未发送请求",
+    running: "执行中...",
+    complete: "已完成",
+    failed: "出错",
+    stop: "停止",
+    clearStream: "清空",
+    thinkingLabel: "思考",
+    permissionTitle: "等待权限确认",
+    questionTitle: "智能体提问",
+    planTitle: "等待计划确认",
+    planApprove: "批准",
+    planRequestChanges: "需修改",
+    planAbandon: "放弃",
+    decline: "跳过"
   },
   "en-US": {
-    title: "Pi UI Bridge",
-    subtitle: "Select page elements and send them to Pi",
+    title: "Codeg UI Bridge",
+    subtitle: "Select page elements and send them to Codeg",
     collapse: "-",
     expand: "+",
     locale: "CN",
@@ -152,7 +193,7 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     noChildren: "No visible children to preview",
     promptPlaceholder: "Type the change request below the selected element",
     hintTree: "Click an ancestor chip or child node to switch the current target",
-    waiting: "Waiting for Pi Bridge connection",
+    waiting: "Waiting for Codeg connection",
     notConnected: "This page is not connected yet. Connect it from the popup first.",
     connectedPrefix: "Connected",
     selectedRecorded: "Element captured",
@@ -162,8 +203,8 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     sourceMissing: "The current element has no sourceHint",
     noElement: "Select a page element first",
     noPrompt: "Enter a change request first",
-    sending: "Sending to Pi...",
-    sentPrefix: "Sent to Pi, request id",
+    sending: "Sending to Codeg...",
+    sentPrefix: "Sent to Codeg, request id",
     copiedJson: "Copied current selection JSON",
     copiedSource: "Copied source",
     copiedLocate: "Copied source location",
@@ -181,20 +222,35 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     modalClose: "Close",
     inlineSend: "Send",
     inlineOpen: "Open Panel",
-    promptOpen: "Prompt"
+    promptOpen: "Prompt",
+    stream: "Agent Stream",
+    streamIdle: "No request sent yet",
+    running: "Running...",
+    complete: "Completed",
+    failed: "Failed",
+    stop: "Stop",
+    clearStream: "Clear",
+    thinkingLabel: "Thinking",
+    permissionTitle: "Permission required",
+    questionTitle: "Agent question",
+    planTitle: "Plan approval",
+    planApprove: "Approve",
+    planRequestChanges: "Request changes",
+    planAbandon: "Abandon",
+    decline: "Skip"
   }
 };
 
 const CSS_TEXT = `
 :host { all: initial; }
-.piui-root {
+.cuib-root {
   position: fixed;
   inset: 0;
   pointer-events: none;
   color: #0f172a;
   font-family: "Fira Sans", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
 }
-.piui-frame {
+.cuib-frame {
   position: fixed;
   top: 0;
   left: 0;
@@ -203,15 +259,15 @@ const CSS_TEXT = `
   pointer-events: none;
   transition: transform 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
 }
-.piui-frame--hover {
+.cuib-frame--hover {
   border: 2px solid rgba(37, 99, 235, 0.95);
   box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.55) inset, 0 0 0 9999px rgba(37, 99, 235, 0.04);
 }
-.piui-frame--selected {
+.cuib-frame--selected {
   border: 2px solid rgba(16, 185, 129, 0.98);
   box-shadow: 0 0 0 1px rgba(167, 243, 208, 0.5) inset, 0 16px 32px rgba(15, 23, 42, 0.12);
 }
-.piui-frame__label {
+.cuib-frame__label {
   position: absolute;
   top: -30px;
   left: 0;
@@ -227,16 +283,16 @@ const CSS_TEXT = `
   white-space: nowrap;
   background: rgba(15, 23, 42, 0.9);
 }
-.piui-panel,
-.piui-inline,
-.piui-modal {
+.cuib-panel,
+.cuib-inline,
+.cuib-modal {
   border: 1px solid rgba(148, 163, 184, 0.26);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(18px);
   pointer-events: auto;
 }
-.piui-panel {
+.cuib-panel {
   position: fixed;
   width: min(392px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
@@ -245,10 +301,10 @@ const CSS_TEXT = `
   overflow: hidden;
   border-radius: 20px;
 }
-.piui-panel--collapsed {
+.cuib-panel--collapsed {
   width: min(348px, calc(100vw - 24px));
 }
-.piui-header {
+.cuib-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -259,17 +315,17 @@ const CSS_TEXT = `
   user-select: none;
   touch-action: none;
 }
-.piui-header--collapsed {
+.cuib-header--collapsed {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
   padding: 12px 14px;
   border-bottom: none;
 }
-.piui-header:active { cursor: grabbing; }
-.piui-header-drag-zone { flex: 1; min-width: 0; }
-.piui-header-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-.piui-header-actions--compact {
+.cuib-header:active { cursor: grabbing; }
+.cuib-header-drag-zone { flex: 1; min-width: 0; }
+.cuib-header-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.cuib-header-actions--compact {
   width: 100%;
   gap: 6px;
   flex-wrap: nowrap;
@@ -277,8 +333,8 @@ const CSS_TEXT = `
   overflow-x: auto;
   scrollbar-width: none;
 }
-.piui-header-actions--compact::-webkit-scrollbar { display: none; }
-.piui-status-pill {
+.cuib-header-actions--compact::-webkit-scrollbar { display: none; }
+.cuib-status-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -290,10 +346,10 @@ const CSS_TEXT = `
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.82));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(15, 23, 42, 0.16);
 }
-.piui-status-pill .piui-status-indicator {
+.cuib-status-pill .cuib-status-indicator {
   box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
 }
-.piui-toggle--mini {
+.cuib-toggle--mini {
   min-height: 32px;
   min-width: 0;
   padding: 6px 10px;
@@ -303,12 +359,12 @@ const CSS_TEXT = `
   letter-spacing: 0.04em;
   flex: 0 0 auto;
 }
-.piui-toggle--mini.piui-button--chip.is-active {
+.cuib-toggle--mini.cuib-button--chip.is-active {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
-.piui-eyebrow,
-.piui-section-label,
-.piui-hint {
+.cuib-eyebrow,
+.cuib-section-label,
+.cuib-hint {
   margin: 0;
   font-size: 11px;
   font-weight: 600;
@@ -316,12 +372,12 @@ const CSS_TEXT = `
   text-transform: uppercase;
   color: #2563eb;
 }
-.piui-title {
+.cuib-title {
   margin: 4px 0 0;
   font-family: "Fira Code", "PingFang SC", "Microsoft YaHei", "Consolas", monospace;
   font-size: 18px;
 }
-.piui-subtitle {
+.cuib-subtitle {
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.5;
@@ -330,14 +386,14 @@ const CSS_TEXT = `
   align-items: center;
   gap: 6px;
 }
-.piui-status-indicator {
+.cuib-status-indicator {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background-color: #ef4444;
 }
-.piui-status-indicator.connected {
+.cuib-status-indicator.connected {
   background-color: #22c55e;
   animation: pulse 2s infinite;
 }
@@ -345,11 +401,11 @@ const CSS_TEXT = `
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
-.piui-toggle,
-.piui-button,
-.piui-button--primary,
-.piui-button--ghost,
-.piui-button--chip {
+.cuib-toggle,
+.cuib-button,
+.cuib-button--primary,
+.cuib-button--ghost,
+.cuib-button--chip {
   min-height: 38px;
   padding: 8px 12px;
   border-radius: 12px;
@@ -358,74 +414,74 @@ const CSS_TEXT = `
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
-.piui-toggle,
-.piui-button,
-.piui-button--ghost,
-.piui-button--chip {
+.cuib-toggle,
+.cuib-button,
+.cuib-button--ghost,
+.cuib-button--chip {
   background: #ffffff;
   color: #0f172a;
 }
-.piui-button--primary {
+.cuib-button--primary {
   background: linear-gradient(135deg, #2563eb, #3b82f6);
   color: #ffffff;
   border-color: transparent;
   box-shadow: 0 16px 28px rgba(37, 99, 235, 0.18);
 }
-.piui-button--chip.is-active {
+.cuib-button--chip.is-active {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(59, 130, 246, 0.08));
   border-color: rgba(37, 99, 235, 0.36);
   color: #1d4ed8;
 }
-.piui-toggle:hover,
-.piui-button:hover,
-.piui-button--primary:hover,
-.piui-button--ghost:hover,
-.piui-button--chip:hover {
+.cuib-toggle:hover,
+.cuib-button:hover,
+.cuib-button--primary:hover,
+.cuib-button--ghost:hover,
+.cuib-button--chip:hover {
   transform: translateY(-1px);
   border-color: rgba(37, 99, 235, 0.32);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
-.piui-body {
+.cuib-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 14px;
   overflow-y: auto;
 }
-.piui-toolbar,
-.piui-actions,
-.piui-secondary-actions,
-.piui-inline-actions {
+.cuib-toolbar,
+.cuib-actions,
+.cuib-secondary-actions,
+.cuib-inline-actions {
   display: grid;
   gap: 10px;
 }
-.piui-toolbar,
-.piui-secondary-actions,
-.piui-inline-actions {
+.cuib-toolbar,
+.cuib-secondary-actions,
+.cuib-inline-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.piui-actions {
+.cuib-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.piui-card,
-.piui-empty,
-.piui-modal-body {
+.cuib-card,
+.cuib-empty,
+.cuib-modal-body {
   padding: 12px;
   border-radius: 14px;
   background: rgba(248, 250, 252, 0.94);
 }
-.piui-card strong {
+.cuib-card strong {
   display: block;
   font-size: 13px;
   line-height: 1.5;
 }
-.piui-card p {
+.cuib-card p {
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.5;
   color: #475569;
 }
-.piui-source-chip {
+.cuib-source-chip {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -437,18 +493,18 @@ const CSS_TEXT = `
   font-size: 11px;
   font-weight: 600;
 }
-.piui-status {
+.cuib-status {
   padding: 0 4px 2px;
   font-size: 12px;
   line-height: 1.5;
   color: #475569;
 }
-.piui-request-actions {
+.cuib-request-actions {
   display: grid;
   gap: 10px;
   margin-top: 10px;
 }
-.piui-inline {
+.cuib-inline {
   position: fixed;
   width: min(360px, calc(100vw - 24px));
   display: grid;
@@ -456,17 +512,17 @@ const CSS_TEXT = `
   padding: 12px;
   border-radius: 16px;
 }
-.piui-inline-title {
+.cuib-inline-title {
   font-size: 12px;
   font-weight: 700;
   color: #0f172a;
 }
-.piui-inline-subtitle {
+.cuib-inline-subtitle {
   font-size: 11px;
   line-height: 1.5;
   color: #64748b;
 }
-.piui-textarea {
+.cuib-textarea {
   width: 100%;
   min-height: 88px;
   padding: 12px 14px;
@@ -481,13 +537,13 @@ const CSS_TEXT = `
   resize: vertical;
   pointer-events: auto;
 }
-.piui-modal-mask {
+.cuib-modal-mask {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.24);
   pointer-events: none;
 }
-.piui-modal {
+.cuib-modal {
   position: fixed;
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
@@ -496,7 +552,7 @@ const CSS_TEXT = `
   overflow: hidden;
   border-radius: 20px;
 }
-.piui-modal-header {
+.cuib-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -507,21 +563,21 @@ const CSS_TEXT = `
   user-select: none;
   touch-action: none;
 }
-.piui-modal-header:active { cursor: grabbing; }
-.piui-modal-content {
+.cuib-modal-header:active { cursor: grabbing; }
+.cuib-modal-content {
   display: grid;
   gap: 12px;
   padding: 14px;
   overflow-y: auto;
 }
-.piui-path-chips {
+.cuib-path-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.piui-path-chip,
-.piui-child-node,
-.piui-tree-node {
+.cuib-path-chip,
+.cuib-child-node,
+.cuib-tree-node {
   border: 1px solid rgba(148, 163, 184, 0.32);
   background: #ffffff;
   color: #0f172a;
@@ -529,59 +585,172 @@ const CSS_TEXT = `
   cursor: pointer;
   font: inherit;
 }
-.piui-path-chip {
+.cuib-path-chip {
   padding: 6px 10px;
   font-size: 11px;
   font-family: "Fira Code", "PingFang SC", "Microsoft YaHei", "Consolas", monospace;
 }
-.piui-current-node {
+.cuib-current-node {
   padding: 10px;
   border-radius: 12px;
   background: rgba(37, 99, 235, 0.08);
   border: 1px solid rgba(37, 99, 235, 0.18);
 }
-.piui-current-node strong { display: block; font-size: 13px; }
-.piui-current-node p { margin: 6px 0 0; font-size: 12px; color: #475569; }
-.piui-children-list {
+.cuib-current-node strong { display: block; font-size: 13px; }
+.cuib-current-node p { margin: 6px 0 0; font-size: 12px; color: #475569; }
+.cuib-children-list {
   display: grid;
   gap: 8px;
 }
-.piui-child-node {
+.cuib-child-node {
   width: 100%;
   padding: 8px 10px;
   text-align: left;
 }
-.piui-tree-node {
+.cuib-tree-node {
   width: 100%;
   text-align: left;
   padding: 5px 8px;
   margin-top: 6px;
 }
-.piui-tree-node--selected {
+.cuib-tree-node--selected {
   color: #2563eb;
   font-weight: 700;
 }
-.piui-tree-block {
+.cuib-tree-block {
   font-family: "Fira Code", "PingFang SC", "Microsoft YaHei", "Consolas", monospace;
   font-size: 11px;
   line-height: 1.7;
 }
-.piui-tree-meta {
+.cuib-tree-meta {
   margin-top: 8px;
   font-size: 12px;
   color: #64748b;
   line-height: 1.6;
 }
+.cuib-stream-block {
+  display: grid;
+  gap: 8px;
+}
+.cuib-stream-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cuib-stream-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(100, 116, 139, 0.14);
+  color: #475569;
+}
+.cuib-stream-badge.running {
+  background: rgba(37, 99, 235, 0.14);
+  color: #1d4ed8;
+}
+.cuib-stream-badge.complete {
+  background: rgba(16, 185, 129, 0.16);
+  color: #047857;
+}
+.cuib-stream-badge.error {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+.cuib-stream-body {
+  display: grid;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.cuib-stream-text {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #0f172a;
+}
+.cuib-stream-thinking {
+  font-size: 11px;
+  color: #64748b;
+}
+.cuib-stream-thinking summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.cuib-stream-tool {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: #ffffff;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cuib-stream-tool strong {
+  font-size: 11px;
+}
+.cuib-stream-tool .cuib-stream-tool-status {
+  color: #64748b;
+}
+.cuib-stream-tool .cuib-stream-tool-status.done {
+  color: #047857;
+}
+.cuib-stream-tool .cuib-stream-tool-status.failed {
+  color: #b91c1c;
+}
+.cuib-stream-tool pre {
+  margin: 4px 0 0;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Fira Code", "PingFang SC", "Microsoft YaHei", "Consolas", monospace;
+  font-size: 10px;
+  color: #475569;
+}
+.cuib-pending-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  background: rgba(254, 249, 195, 0.6);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cuib-pending-card pre {
+  margin: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  color: #475569;
+}
+.cuib-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cuib-stream-empty {
+  font-size: 12px;
+  color: #94a3b8;
+}
 @media (max-width: 640px) {
-  .piui-panel,
-  .piui-modal,
-  .piui-inline {
+  .cuib-panel,
+  .cuib-modal,
+  .cuib-inline {
     width: calc(100vw - 24px);
   }
-  .piui-actions,
-  .piui-secondary-actions,
-  .piui-toolbar,
-  .piui-inline-actions {
+  .cuib-actions,
+  .cuib-secondary-actions,
+  .cuib-toolbar,
+  .cuib-inline-actions {
     grid-template-columns: 1fr;
   }
 }
@@ -686,7 +855,7 @@ function isReasonablePromotionTarget(current: HTMLElement, candidate: HTMLElemen
   if (candidate === document.body || candidate === document.documentElement) {
     return false;
   }
-  if (candidate.closest(`[data-pi-ui-bridge-ui="true"]`)) {
+  if (candidate.closest(`[data-codeg-ui-bridge-ui="true"]`)) {
     return false;
   }
   if (LANDMARK_TAGS.has(candidate.tagName)) {
@@ -823,11 +992,11 @@ function getTestAttributeHints(element: HTMLElement): string[] {
 }
 
 function getSourceHint(element: HTMLElement): ContentSourceHint | undefined {
-  const file = element.getAttribute("data-source-file") || undefined;
-  const line = element.getAttribute("data-source-line") || undefined;
-  const column = element.getAttribute("data-source-column") || undefined;
-  const sourceId = element.getAttribute("data-source-id") || undefined;
-  const component = element.getAttribute("data-component") || undefined;
+  const file = element.getAttribute("data-codeg-source-file") || undefined;
+  const line = element.getAttribute("data-codeg-source-line") || undefined;
+  const column = element.getAttribute("data-codeg-source-column") || undefined;
+  const sourceId = element.getAttribute("data-codeg-source-id") || undefined;
+  const component = element.getAttribute("data-codeg-component") || undefined;
 
   if (!file && !line && !column && !sourceId && !component) {
     return undefined;
@@ -857,10 +1026,10 @@ function toSelection(element: HTMLElement): ContentSelection {
 function isInsideUi(event: Event): boolean {
   const inPath = event.composedPath().some((node) => {
     if (node instanceof HTMLElement) {
-      if (node.className === "piui-modal-mask" || node.className === "piui-modal") {
+      if (node.className === "cuib-modal-mask" || node.className === "cuib-modal") {
         return false;
       }
-      return node.dataset.piUiBridgeUi === "true" || node.id === HOST_ID;
+      return node.dataset.codegUiBridgeUi === "true" || node.id === HOST_ID;
     }
     return false;
   });
@@ -876,10 +1045,10 @@ function isInsideUi(event: Event): boolean {
   const elements = document.elementsFromPoint(event.clientX, event.clientY);
   return elements.some((node) => {
     if (node instanceof HTMLElement) {
-      if (node.className === "piui-modal-mask" || node.className === "piui-modal") {
+      if (node.className === "cuib-modal-mask" || node.className === "cuib-modal") {
         return false;
       }
-      return node.dataset.piUiBridgeUi === "true" || node.id === HOST_ID || node.closest(`#${HOST_ID}`) !== null;
+      return node.dataset.codegUiBridgeUi === "true" || node.id === HOST_ID || node.closest(`#${HOST_ID}`) !== null;
     }
     return false;
   });
@@ -893,6 +1062,227 @@ function getElementLabel(element: HTMLElement): string {
 
 function buildSelectionJson(selection: ContentSelection | null, sourceHint?: ContentSourceHint): string {
   return JSON.stringify({ selection, sourceHint }, null, 2);
+}
+
+function appendStreamText(state: PanelState, kind: "text" | "thinking", text: string): void {
+  if (!text) {
+    return;
+  }
+  const last = state.stream[state.stream.length - 1];
+  if (last && last.type === kind) {
+    last.text += text;
+    if (last.text.length > STREAM_TEXT_MAX_CHARS) {
+      last.text = last.text.slice(-Math.floor(STREAM_TEXT_MAX_CHARS / 2));
+    }
+    return;
+  }
+  state.stream.push({ type: kind, text });
+  if (state.stream.length > STREAM_MAX_ITEMS) {
+    state.stream = state.stream.slice(-STREAM_MAX_ITEMS);
+  }
+}
+
+function resetTurnState(state: PanelState): void {
+  state.stream = [];
+  state.turnState = "running";
+  state.turnNote = "";
+  state.pendingPermission = null;
+  state.pendingQuestion = null;
+  state.pendingPlan = null;
+}
+
+function applyAgentEventToState(state: PanelState, event: AgentStreamEvent): void {
+  switch (event.kind) {
+    case "text":
+      appendStreamText(state, "text", event.text);
+      break;
+    case "thinking":
+      appendStreamText(state, "thinking", event.text);
+      break;
+    case "tool": {
+      const existing = state.stream.find((item) => item.type === "tool" && item.toolCallId === event.toolCallId);
+      if (existing && existing.type === "tool") {
+        if (event.title !== undefined) {
+          existing.title = event.title;
+        }
+        if (event.status !== undefined) {
+          existing.status = event.status;
+        }
+        if (event.content !== undefined && event.content !== "") {
+          existing.content = event.content;
+        }
+      } else {
+        state.stream.push({
+          type: "tool",
+          toolCallId: event.toolCallId,
+          title: event.title || event.toolCallId,
+          status: event.status || "pending",
+          content: event.content || ""
+        });
+        if (state.stream.length > STREAM_MAX_ITEMS) {
+          state.stream = state.stream.slice(-STREAM_MAX_ITEMS);
+        }
+      }
+      break;
+    }
+    case "turn_complete":
+      state.turnState = "complete";
+      state.turnNote = "";
+      state.pendingPermission = null;
+      state.pendingQuestion = null;
+      state.pendingPlan = null;
+      break;
+    case "error":
+      state.turnState = "error";
+      state.turnNote = event.message;
+      break;
+    case "permission":
+      state.pendingPermission = { requestId: event.requestId, title: event.title, options: event.options };
+      state.turnState = "running";
+      break;
+    case "question":
+      state.pendingQuestion = { questionId: event.questionId, questions: event.questions };
+      break;
+    case "question_resolved":
+      if (state.pendingQuestion?.questionId === event.questionId) {
+        state.pendingQuestion = null;
+      }
+      break;
+    case "plan_approval":
+      state.pendingPlan = { approvalId: event.approvalId, planMarkdown: event.planMarkdown };
+      break;
+    case "plan_approval_resolved":
+      if (state.pendingPlan?.approvalId === event.approvalId) {
+        state.pendingPlan = null;
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+function streamBadge(state: PanelState): { cls: string; label: string } {
+  switch (state.turnState) {
+    case "running":
+      return { cls: "running", label: t(state, "running") };
+    case "complete":
+      return { cls: "complete", label: t(state, "complete") };
+    case "error":
+      return { cls: "error", label: t(state, "failed") };
+    default:
+      return { cls: "", label: t(state, "streamIdle") };
+  }
+}
+
+function buildStreamHeadMarkup(state: PanelState): string {
+  const badge = streamBadge(state);
+  return `
+    <p class="cuib-section-label" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "stream"))}</p>
+    <span id="cuibStreamBadge" class="cuib-stream-badge ${badge.cls}" data-codeg-ui-bridge-ui="true">${escapeHtml(badge.label)}</span>
+    <span style="flex:1" data-codeg-ui-bridge-ui="true"></span>
+    ${state.turnState === "running" ? `<button id="cuibStopTurn" class="cuib-button--ghost" style="min-height:26px;padding:2px 10px;" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "stop"))}</button>` : ""}
+    <button id="cuibClearStream" class="cuib-button--ghost" style="min-height:26px;padding:2px 10px;" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "clearStream"))}</button>
+  `;
+}
+
+function buildPendingMarkup(state: PanelState): string {
+  const cards: string[] = [];
+
+  if (state.pendingPermission) {
+    const options = state.pendingPermission.options
+      .map(
+        (option) =>
+          `<button class="cuib-button--ghost cuib-perm-option" data-perm-request-id="${escapeHtml(state.pendingPermission!.requestId)}" data-perm-option-id="${escapeHtml(
+            option.optionId
+          )}" data-codeg-ui-bridge-ui="true">${escapeHtml(option.name || option.optionId)}</button>`
+      )
+      .join("");
+    cards.push(`
+      <div class="cuib-pending-card" data-codeg-ui-bridge-ui="true">
+        <strong>${escapeHtml(t(state, "permissionTitle"))}${state.pendingPermission.title ? `: ${escapeHtml(state.pendingPermission.title)}` : ""}</strong>
+        <div class="cuib-pending-actions" data-codeg-ui-bridge-ui="true">${options}</div>
+      </div>
+    `);
+  }
+
+  if (state.pendingQuestion) {
+    for (const question of state.pendingQuestion.questions) {
+      const options = question.options
+        .map(
+          (option) =>
+            `<button class="cuib-button--ghost cuib-question-option" data-question-id="${escapeHtml(question.id)}" data-question-label="${escapeHtml(
+              option.label
+            )}" data-question-multi="${question.multiSelect ? "1" : ""}" data-codeg-ui-bridge-ui="true" title="${escapeHtml(option.description || "")}">${escapeHtml(option.label)}</button>`
+        )
+        .join("");
+      const multiControls = question.multiSelect
+        ? `<button class="cuib-button--primary cuib-question-confirm" data-question-id="${escapeHtml(question.id)}" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "send"))}</button>`
+        : "";
+      cards.push(`
+        <div class="cuib-pending-card" data-codeg-ui-bridge-ui="true">
+          <strong>${escapeHtml(t(state, "questionTitle"))}${question.header ? `: ${escapeHtml(question.header)}` : ""}</strong>
+          <div class="cuib-stream-text" data-codeg-ui-bridge-ui="true">${escapeHtml(question.question)}</div>
+          <div class="cuib-pending-actions" data-codeg-ui-bridge-ui="true">${options}${multiControls}
+            <button class="cuib-button--ghost cuib-question-decline" data-question-id="${escapeHtml(question.id)}" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "decline"))}</button>
+          </div>
+        </div>
+      `);
+    }
+  }
+
+  if (state.pendingPlan) {
+    const plan = state.pendingPlan.planMarkdown.length > 4000
+      ? `${state.pendingPlan.planMarkdown.slice(0, 4000)}\n...`
+      : state.pendingPlan.planMarkdown;
+    cards.push(`
+      <div class="cuib-pending-card" data-codeg-ui-bridge-ui="true">
+        <strong>${escapeHtml(t(state, "planTitle"))}</strong>
+        <pre data-codeg-ui-bridge-ui="true">${escapeHtml(plan)}</pre>
+        <div class="cuib-pending-actions" data-codeg-ui-bridge-ui="true">
+          <button class="cuib-button--primary cuib-plan-option" data-plan-approval-id="${escapeHtml(state.pendingPlan.approvalId)}" data-plan-decision="approve" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "planApprove"))}</button>
+          <button class="cuib-button--ghost cuib-plan-option" data-plan-approval-id="${escapeHtml(state.pendingPlan.approvalId)}" data-plan-decision="request_changes" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "planRequestChanges"))}</button>
+          <button class="cuib-button--ghost cuib-plan-option" data-plan-approval-id="${escapeHtml(state.pendingPlan.approvalId)}" data-plan-decision="abandon" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "planAbandon"))}</button>
+        </div>
+      </div>
+    `);
+  }
+
+  return cards.join("");
+}
+
+function buildStreamMarkup(state: PanelState): string {
+  const parts: string[] = [];
+
+  if (state.turnNote && state.turnState === "error") {
+    parts.push(`<div class="cuib-stream-text" data-codeg-ui-bridge-ui="true">${escapeHtml(state.turnNote)}</div>`);
+  }
+
+  for (const item of state.stream) {
+    if (item.type === "text") {
+      parts.push(`<div class="cuib-stream-text" data-codeg-ui-bridge-ui="true">${escapeHtml(item.text)}</div>`);
+    } else if (item.type === "thinking") {
+      parts.push(`
+        <details class="cuib-stream-thinking" data-codeg-ui-bridge-ui="true">
+          <summary data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "thinkingLabel"))}</summary>
+          <div class="cuib-stream-text" data-codeg-ui-bridge-ui="true">${escapeHtml(item.text)}</div>
+        </details>
+      `);
+    } else {
+      const statusClass = item.status === "completed" ? "done" : item.status === "failed" || item.status === "errored" ? "failed" : "";
+      parts.push(`
+        <div class="cuib-stream-tool" data-codeg-ui-bridge-ui="true">
+          <strong data-codeg-ui-bridge-ui="true">${escapeHtml(item.title || item.toolCallId)}</strong>
+          <span class="cuib-stream-tool-status ${statusClass}" data-codeg-ui-bridge-ui="true">${escapeHtml(item.status || "")}</span>
+          ${item.content ? `<pre data-codeg-ui-bridge-ui="true">${escapeHtml(item.content)}</pre>` : ""}
+        </div>
+      `);
+    }
+  }
+
+  if (parts.length === 0) {
+    return `<div class="cuib-stream-empty" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "streamIdle"))}</div>`;
+  }
+  return parts.join("");
 }
 
 function getChildrenElements(element: HTMLElement): HTMLElement[] {
@@ -950,7 +1340,7 @@ function isTextInputElement(element: EventTarget | null): boolean {
 
 function buildDomExplorerMarkup(state: PanelState): string {
   if (!state.selectedElement) {
-    return `<div class="piui-empty">${escapeHtml(t(state, "noSelection"))}</div>`;
+    return `<div class="cuib-empty">${escapeHtml(t(state, "noSelection"))}</div>`;
   }
 
   const ancestors: HTMLElement[] = [];
@@ -964,69 +1354,69 @@ function buildDomExplorerMarkup(state: PanelState): string {
   const visibleChildren = state.childrenExpanded ? children : children.slice(0, CHILD_PREVIEW_COUNT);
 
   const chips = ancestors.length
-    ? `<div class="piui-path-chips">${ancestors
+    ? `<div class="cuib-path-chips">${ancestors
         .map(
           (item) =>
-            `<button class="piui-path-chip" data-pi-node-path="${escapeHtml(getDomPath(item, 8))}" data-pi-ui-bridge-ui="true">${escapeHtml(getElementLabel(item))}</button>`
+            `<button class="cuib-path-chip" data-codeg-node-path="${escapeHtml(getDomPath(item, 8))}" data-codeg-ui-bridge-ui="true">${escapeHtml(getElementLabel(item))}</button>`
         )
         .join("")}</div>`
-    : `<div class="piui-empty">${escapeHtml(t(state, "noSource"))}</div>`;
+    : `<div class="cuib-empty">${escapeHtml(t(state, "noSource"))}</div>`;
 
   const treeLines = visibleChildren.length
     ? visibleChildren
         .map(
           (item) =>
-            `<button class="piui-tree-node${item === state.selectedElement ? " piui-tree-node--selected" : ""}" data-pi-node-path="${escapeHtml(
+            `<button class="cuib-tree-node${item === state.selectedElement ? " cuib-tree-node--selected" : ""}" data-codeg-node-path="${escapeHtml(
               getDomPath(item, 8)
-            )}" data-pi-ui-bridge-ui="true">${escapeHtml(getElementLabel(item))}</button>`
+            )}" data-codeg-ui-bridge-ui="true">${escapeHtml(getElementLabel(item))}</button>`
         )
         .join("")
-    : `<div class="piui-empty">${escapeHtml(t(state, "noChildren"))}</div>`;
+    : `<div class="cuib-empty">${escapeHtml(t(state, "noChildren"))}</div>`;
 
   const childToggle = children.length > CHILD_PREVIEW_COUNT
-    ? `<button id="piuiToggleChildren" class="piui-button--ghost" data-pi-ui-bridge-ui="true">${escapeHtml(
+    ? `<button id="cuibToggleChildren" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(
         state.childrenExpanded ? t(state, "lessChildren") : t(state, "moreChildren")
       )}</button>`
     : "";
 
   return `
-    <div class="piui-modal-body">
-      <p class="piui-section-label">${escapeHtml(t(state, "ancestorPath"))}</p>
+    <div class="cuib-modal-body">
+      <p class="cuib-section-label">${escapeHtml(t(state, "ancestorPath"))}</p>
       ${chips}
     </div>
-    <div class="piui-modal-body">
-      <p class="piui-section-label">${escapeHtml(t(state, "currentNode"))}</p>
-      <div class="piui-current-node">
+    <div class="cuib-modal-body">
+      <p class="cuib-section-label">${escapeHtml(t(state, "currentNode"))}</p>
+      <div class="cuib-current-node">
         <strong>${escapeHtml(getElementLabel(state.selectedElement))}</strong>
         <p>${escapeHtml(`${t(state, "selector")}: ${state.selectedSelection?.selector || t(state, "noSource")}`)}</p>
         <p>${escapeHtml(`${t(state, "text")}: ${state.selectedSelection?.text || t(state, "noSource")}`)}</p>
       </div>
     </div>
-    <div class="piui-modal-body">
-      <p class="piui-section-label">${escapeHtml(t(state, "childPreview"))}</p>
-      <div class="piui-children-list">${visibleChildren
+    <div class="cuib-modal-body">
+      <p class="cuib-section-label">${escapeHtml(t(state, "childPreview"))}</p>
+      <div class="cuib-children-list">${visibleChildren
         .map(
           (item) =>
-            `<button class="piui-child-node" data-pi-node-path="${escapeHtml(getDomPath(item, 8))}" data-pi-ui-bridge-ui="true">${escapeHtml(
+            `<button class="cuib-child-node" data-codeg-node-path="${escapeHtml(getDomPath(item, 8))}" data-codeg-ui-bridge-ui="true">${escapeHtml(
               getElementLabel(item)
             )}</button>`
         )
-        .join("") || `<div class="piui-empty">${escapeHtml(t(state, "noChildren"))}</div>`}</div>
+        .join("") || `<div class="cuib-empty">${escapeHtml(t(state, "noChildren"))}</div>`}</div>
       ${childToggle}
     </div>
-    <div class="piui-card piui-tree-block">
+    <div class="cuib-card cuib-tree-block">
       ${treeLines}
-      <div class="piui-tree-meta">${escapeHtml(`${t(state, "childrenCount")}: ${children.length}`)}</div>
-      <div class="piui-tree-meta">${escapeHtml(t(state, "siblingHint"))}</div>
+      <div class="cuib-tree-meta">${escapeHtml(`${t(state, "childrenCount")}: ${children.length}`)}</div>
+      <div class="cuib-tree-meta">${escapeHtml(t(state, "siblingHint"))}</div>
     </div>
   `;
 }
 
 async function boot() {
-  if (window.__PI_UI_BRIDGE_CONTENT_BOOTED__) {
+  if (window.__CODEG_UI_BRIDGE_CONTENT_BOOTED__) {
     return;
   }
-  window.__PI_UI_BRIDGE_CONTENT_BOOTED__ = true;
+  window.__CODEG_UI_BRIDGE_CONTENT_BOOTED__ = true;
 
   const existingHost = document.getElementById(HOST_ID);
   if (existingHost) {
@@ -1055,14 +1445,20 @@ async function boot() {
     panelY: restoredPanelPosition.y,
     modalX: Math.max(PANEL_MARGIN, window.innerWidth / 2 - 280),
     modalY: Math.max(PANEL_MARGIN, window.innerHeight / 2 - 260),
-    locale: getInitialLocale()
+    locale: getInitialLocale(),
+    stream: [],
+    turnState: "idle",
+    turnNote: "",
+    pendingPermission: null,
+    pendingQuestion: null,
+    pendingPlan: null
   };
 
   let dragState: DragState = null;
 
   const host = document.createElement("div");
   host.id = HOST_ID;
-  host.dataset.piUiBridgeUi = "true";
+  host.dataset.codegUiBridgeUi = "true";
   host.style.position = "fixed";
   host.style.inset = "0";
   host.style.pointerEvents = "none";
@@ -1071,44 +1467,44 @@ async function boot() {
 
   const style = document.createElement("style");
   style.textContent = CSS_TEXT;
-  style.id = "pi-ui-bridge-styles";
+  style.id = "codeg-ui-bridge-styles";
 
   const root = document.createElement("div");
-  root.className = "piui-root";
-  root.dataset.piUiBridgeUi = "true";
+  root.className = "cuib-root";
+  root.dataset.codegUiBridgeUi = "true";
 
   const hoverFrame = document.createElement("div");
-  hoverFrame.className = "piui-frame piui-frame--hover";
+  hoverFrame.className = "cuib-frame cuib-frame--hover";
   hoverFrame.style.display = "none";
   const hoverLabel = document.createElement("span");
-  hoverLabel.className = "piui-frame__label";
+  hoverLabel.className = "cuib-frame__label";
   hoverFrame.appendChild(hoverLabel);
 
   const selectedFrame = document.createElement("div");
-  selectedFrame.className = "piui-frame piui-frame--selected";
+  selectedFrame.className = "cuib-frame cuib-frame--selected";
   selectedFrame.style.display = "none";
   const selectedLabel = document.createElement("span");
-  selectedLabel.className = "piui-frame__label";
+  selectedLabel.className = "cuib-frame__label";
   selectedFrame.appendChild(selectedLabel);
 
   const panel = document.createElement("aside");
-  panel.className = "piui-panel";
-  panel.dataset.piUiBridgeUi = "true";
+  panel.className = "cuib-panel";
+  panel.dataset.codegUiBridgeUi = "true";
 
   const inlineComposer = document.createElement("div");
-  inlineComposer.className = "piui-inline";
+  inlineComposer.className = "cuib-inline";
   inlineComposer.style.display = "none";
-  inlineComposer.dataset.piUiBridgeUi = "true";
+  inlineComposer.dataset.codegUiBridgeUi = "true";
 
   const modalMask = document.createElement("div");
-  modalMask.className = "piui-modal-mask";
+  modalMask.className = "cuib-modal-mask";
   modalMask.style.display = "none";
-  modalMask.dataset.piUiBridgeUi = "true";
+  modalMask.dataset.codegUiBridgeUi = "true";
 
   const modal = document.createElement("div");
-  modal.className = "piui-modal";
+  modal.className = "cuib-modal";
   modal.style.display = "none";
-  modal.dataset.piUiBridgeUi = "true";
+  modal.dataset.codegUiBridgeUi = "true";
 
   root.appendChild(hoverFrame);
   root.appendChild(selectedFrame);
@@ -1136,95 +1532,100 @@ async function boot() {
     panel.style.left = `${state.panelX}px`;
     panel.style.top = `${state.panelY}px`;
     panel.style.display = "flex";
-    panel.className = `piui-panel${state.collapsed ? " piui-panel--collapsed" : ""}`;
+    panel.className = `cuib-panel${state.collapsed ? " cuib-panel--collapsed" : ""}`;
 
     const collapsedHeader = `
-      <div class="piui-header piui-header--collapsed" data-pi-ui-bridge-ui="true">
-        <div class="piui-header-actions piui-header-actions--compact" data-pi-ui-bridge-ui="true">
-          <div class="piui-status-pill" data-pi-ui-bridge-ui="true" aria-label="bridge-status">
-            <span class="piui-status-indicator ${state.runtime?.browserSessionId ? "connected" : "disconnected"}" data-pi-ui-bridge-ui="true"></span>
+      <div class="cuib-header cuib-header--collapsed" data-codeg-ui-bridge-ui="true">
+        <div class="cuib-header-actions cuib-header-actions--compact" data-codeg-ui-bridge-ui="true">
+          <div class="cuib-status-pill" data-codeg-ui-bridge-ui="true" aria-label="bridge-status">
+            <span class="cuib-status-indicator ${state.runtime?.connectionId ? "connected" : "disconnected"}" data-codeg-ui-bridge-ui="true"></span>
           </div>
-          <button id="piuiToggleSelect" class="piui-toggle piui-toggle--mini piui-button--chip ${state.selecting ? "is-active" : ""}" data-pi-ui-bridge-ui="true">${escapeHtml(state.selecting ? "选择:开" : "选择:关")}</button>
-          <button id="piuiRefresh" class="piui-toggle piui-toggle--mini" data-pi-ui-bridge-ui="true">刷新</button>
-          ${state.runtime?.browserSessionId ? `<button id="piuiDisconnect" class="piui-toggle piui-toggle--mini" data-pi-ui-bridge-ui="true">断开</button>` : ""}
-          <button id="piuiToggleCollapse" class="piui-toggle piui-toggle--mini" data-pi-ui-bridge-ui="true">展开</button>
-          <button id="piuiClosePanel" class="piui-toggle piui-toggle--mini" aria-label="Close panel" data-pi-ui-bridge-ui="true">×</button>
+          <button id="cuibToggleSelect" class="cuib-toggle cuib-toggle--mini cuib-button--chip ${state.selecting ? "is-active" : ""}" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selecting ? "选择:开" : "选择:关")}</button>
+          <button id="cuibRefresh" class="cuib-toggle cuib-toggle--mini" data-codeg-ui-bridge-ui="true">刷新</button>
+          ${state.runtime?.connectionId ? `<button id="cuibDisconnect" class="cuib-toggle cuib-toggle--mini" data-codeg-ui-bridge-ui="true">断开</button>` : ""}
+          <button id="cuibToggleCollapse" class="cuib-toggle cuib-toggle--mini" data-codeg-ui-bridge-ui="true">展开</button>
+          <button id="cuibClosePanel" class="cuib-toggle cuib-toggle--mini" aria-label="Close panel" data-codeg-ui-bridge-ui="true">×</button>
         </div>
       </div>
     `;
 
     panel.innerHTML = state.collapsed ? collapsedHeader : `
-      <div class="piui-header" data-pi-ui-bridge-ui="true">
-        <div class="piui-header-drag-zone" data-pi-ui-bridge-ui="true">
-          <p class="piui-eyebrow">${escapeHtml(t(state, "title"))}</p>
-          <h2 class="piui-title">${escapeHtml(t(state, "subtitle"))}</h2>
-          <p class="piui-subtitle">
-            <span class="piui-status-indicator ${state.runtime?.browserSessionId ? "connected" : "disconnected"}" data-pi-ui-bridge-ui="true"></span>
+      <div class="cuib-header" data-codeg-ui-bridge-ui="true">
+        <div class="cuib-header-drag-zone" data-codeg-ui-bridge-ui="true">
+          <p class="cuib-eyebrow">${escapeHtml(t(state, "title"))}</p>
+          <h2 class="cuib-title">${escapeHtml(t(state, "subtitle"))}</h2>
+          <p class="cuib-subtitle">
+            <span class="cuib-status-indicator ${state.runtime?.connectionId ? "connected" : "disconnected"}" data-codeg-ui-bridge-ui="true"></span>
             ${escapeHtml(state.statusText)}
           </p>
         </div>
-        <div class="piui-header-actions" data-pi-ui-bridge-ui="true">
-          ${state.runtime?.browserSessionId ? `<button id="piuiDisconnect" class="piui-toggle" data-pi-ui-bridge-ui="true">断开</button>` : ""}
-          <button id="piuiToggleLocale" class="piui-toggle" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "locale"))}</button>
-          <button id="piuiToggleCollapse" class="piui-toggle" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "collapse"))}</button>
-          <button id="piuiClosePanel" class="piui-toggle" aria-label="Close panel" data-pi-ui-bridge-ui="true">×</button>
+        <div class="cuib-header-actions" data-codeg-ui-bridge-ui="true">
+          ${state.runtime?.connectionId ? `<button id="cuibDisconnect" class="cuib-toggle" data-codeg-ui-bridge-ui="true">断开</button>` : ""}
+          <button id="cuibToggleLocale" class="cuib-toggle" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "locale"))}</button>
+          <button id="cuibToggleCollapse" class="cuib-toggle" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "collapse"))}</button>
+          <button id="cuibClosePanel" class="cuib-toggle" aria-label="Close panel" data-codeg-ui-bridge-ui="true">×</button>
         </div>
       </div>
-      <div class="piui-body" data-pi-ui-bridge-ui="true">
-        <div class="piui-toolbar" data-pi-ui-bridge-ui="true">
-          <button id="piuiToggleSelect" class="piui-button--chip ${state.selecting ? "is-active" : ""}" data-pi-ui-bridge-ui="true">${escapeHtml(state.selecting ? t(state, "selectOn") : t(state, "selectOff"))}</button>
-          <button id="piuiRefresh" class="piui-button--ghost" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "refresh"))}</button>
+      <div class="cuib-body" data-codeg-ui-bridge-ui="true">
+        <div class="cuib-toolbar" data-codeg-ui-bridge-ui="true">
+          <button id="cuibToggleSelect" class="cuib-button--chip ${state.selecting ? "is-active" : ""}" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selecting ? t(state, "selectOn") : t(state, "selectOff"))}</button>
+          <button id="cuibRefresh" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "refresh"))}</button>
         </div>
-        <section data-pi-ui-bridge-ui="true">
-          <p class="piui-section-label">${escapeHtml(t(state, "selection"))}</p>
-          <div class="piui-card">
+        <section data-codeg-ui-bridge-ui="true">
+          <p class="cuib-section-label">${escapeHtml(t(state, "selection"))}</p>
+          <div class="cuib-card">
             <strong>${state.selectedElement ? escapeHtml(getElementLabel(state.selectedElement)) : escapeHtml(t(state, "noSelection"))}</strong>
             <p>${escapeHtml(`${t(state, "domPath")}: ${state.selectedSelection?.domPath || t(state, "noSource")}`)}</p>
             <p>${escapeHtml(`${t(state, "semanticPath")}: ${state.selectedSelection?.semanticPath || t(state, "noSource")}`)}</p>
             <p>${escapeHtml(`${t(state, "rect")}: ${state.selectedSelection?.rect ? `${state.selectedSelection.rect.x}, ${state.selectedSelection.rect.y}, ${state.selectedSelection.rect.width}×${state.selectedSelection.rect.height}` : t(state, "noSource")}`)}</p>
           </div>
         </section>
-        <section data-pi-ui-bridge-ui="true">
-          <p class="piui-section-label">${escapeHtml(t(state, "source"))}</p>
-          <div class="piui-card">
-            <div class="piui-source-chip">${escapeHtml(sourceText)}</div>
+        <section data-codeg-ui-bridge-ui="true">
+          <p class="cuib-section-label">${escapeHtml(t(state, "source"))}</p>
+          <div class="cuib-card">
+            <div class="cuib-source-chip">${escapeHtml(sourceText)}</div>
             <p>${escapeHtml(`${t(state, "component")}: ${state.selectedSourceHint?.component || t(state, "noSource")}`)}</p>
             <p>${escapeHtml(`${t(state, "sourceId")}: ${state.selectedSourceHint?.sourceId || t(state, "noSource")}`)}</p>
           </div>
         </section>
-        <div class="piui-actions" data-pi-ui-bridge-ui="true">
-          <button id="piuiOpenDom" class="piui-button--ghost" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
-          <button id="piuiLocateSource" class="piui-button--ghost" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "locate"))}</button>
-          <button id="piuiCopySource" class="piui-button--ghost" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "copySource"))}</button>
+        <div class="cuib-actions" data-codeg-ui-bridge-ui="true">
+          <button id="cuibOpenDom" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
+          <button id="cuibLocateSource" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "locate"))}</button>
+          <button id="cuibCopySource" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "copySource"))}</button>
         </div>
-        <div class="piui-secondary-actions" data-pi-ui-bridge-ui="true">
-          <button id="piuiCopyJson" class="piui-button" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "copyJson"))}</button>
+        <div class="cuib-secondary-actions" data-codeg-ui-bridge-ui="true">
+          <button id="cuibCopyJson" class="cuib-button" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "copyJson"))}</button>
         </div>
-        <section data-pi-ui-bridge-ui="true">
-          <p class="piui-section-label">${escapeHtml(t(state, "request"))}</p>
-          <div class="piui-card">
-            <textarea id="piuiPanelPrompt" class="piui-textarea" data-pi-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "promptPlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
-            <div class="piui-request-actions" data-pi-ui-bridge-ui="true">
-              <button id="piuiPanelSend" class="piui-button--primary" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "send"))}</button>
+        <section data-codeg-ui-bridge-ui="true">
+          <p class="cuib-section-label">${escapeHtml(t(state, "request"))}</p>
+          <div class="cuib-card">
+            <textarea id="cuibPanelPrompt" class="cuib-textarea" data-codeg-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "promptPlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
+            <div class="cuib-request-actions" data-codeg-ui-bridge-ui="true">
+              <button id="cuibPanelSend" class="cuib-button--primary" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "send"))}</button>
             </div>
           </div>
         </section>
-        <div class="piui-status" data-pi-ui-bridge-ui="true">${escapeHtml(state.statusText)}</div>
+        <section data-codeg-ui-bridge-ui="true" id="cuibStreamSection">
+          <div id="cuibStreamHead" class="cuib-stream-head" data-codeg-ui-bridge-ui="true">${buildStreamHeadMarkup(state)}</div>
+          <div id="cuibPendingArea" style="display:grid; gap:8px;" data-codeg-ui-bridge-ui="true">${buildPendingMarkup(state)}</div>
+          <div id="cuibStreamBody" class="cuib-stream-body" data-codeg-ui-bridge-ui="true">${buildStreamMarkup(state)}</div>
+        </section>
+        <div class="cuib-status" data-codeg-ui-bridge-ui="true">${escapeHtml(state.statusText)}</div>
       </div>
     `;
 
-    const header = panel.querySelector<HTMLElement>(".piui-header");
-    const toggleLocaleButton = panel.querySelector<HTMLButtonElement>("#piuiToggleLocale");
-    const toggleCollapseButton = panel.querySelector<HTMLButtonElement>("#piuiToggleCollapse");
-    const toggleSelectButton = panel.querySelector<HTMLButtonElement>("#piuiToggleSelect");
-    const refreshButton = panel.querySelector<HTMLButtonElement>("#piuiRefresh");
-    const closePanelButton = panel.querySelector<HTMLButtonElement>("#piuiClosePanel");
-    const openDomButton = panel.querySelector<HTMLButtonElement>("#piuiOpenDom");
-    const locateSourceButton = panel.querySelector<HTMLButtonElement>("#piuiLocateSource");
-    const copySourceButton = panel.querySelector<HTMLButtonElement>("#piuiCopySource");
-    const copyJsonButton = panel.querySelector<HTMLButtonElement>("#piuiCopyJson");
-    const panelPrompt = panel.querySelector<HTMLTextAreaElement>("#piuiPanelPrompt");
-    const panelSendButton = panel.querySelector<HTMLButtonElement>("#piuiPanelSend");
+    const header = panel.querySelector<HTMLElement>(".cuib-header");
+    const toggleLocaleButton = panel.querySelector<HTMLButtonElement>("#cuibToggleLocale");
+    const toggleCollapseButton = panel.querySelector<HTMLButtonElement>("#cuibToggleCollapse");
+    const toggleSelectButton = panel.querySelector<HTMLButtonElement>("#cuibToggleSelect");
+    const refreshButton = panel.querySelector<HTMLButtonElement>("#cuibRefresh");
+    const closePanelButton = panel.querySelector<HTMLButtonElement>("#cuibClosePanel");
+    const openDomButton = panel.querySelector<HTMLButtonElement>("#cuibOpenDom");
+    const locateSourceButton = panel.querySelector<HTMLButtonElement>("#cuibLocateSource");
+    const copySourceButton = panel.querySelector<HTMLButtonElement>("#cuibCopySource");
+    const copyJsonButton = panel.querySelector<HTMLButtonElement>("#cuibCopyJson");
+    const panelPrompt = panel.querySelector<HTMLTextAreaElement>("#cuibPanelPrompt");
+    const panelSendButton = panel.querySelector<HTMLButtonElement>("#cuibPanelSend");
 
     if (header) {
       header.onpointerdown = (event) => {
@@ -1235,7 +1636,7 @@ async function boot() {
     }
     toggleLocaleButton?.addEventListener("click", () => {
       state.locale = state.locale === "zh-CN" ? "en-US" : "zh-CN";
-      state.statusText = state.runtime?.browserSessionId ? `${t(state, "connectedPrefix")}: ${state.runtime.browserSessionId}` : t(state, "waiting");
+      state.statusText = state.runtime?.connectionId ? `${t(state, "connectedPrefix")}: ${state.runtime.connectionId}` : t(state, "waiting");
       renderAll();
     });
     toggleCollapseButton?.addEventListener("click", () => { state.collapsed = !state.collapsed; renderAll(); });
@@ -1251,11 +1652,11 @@ async function boot() {
       destroyOverlay();
     });
 
-    const disconnectButton = panel.querySelector<HTMLButtonElement>("#piuiDisconnect");
+    const disconnectButton = panel.querySelector<HTMLButtonElement>("#cuibDisconnect");
     disconnectButton?.addEventListener("click", async () => {
       try {
         const response = await safeSendMessage<RuntimeResponse>({
-          type: MESSAGE_TYPES.contentDisconnectBridge
+          type: MESSAGE_TYPES.contentDisconnect
         });
         if (!response.ok) {
           state.statusText = response.error || "断开连接失败";
@@ -1264,7 +1665,7 @@ async function boot() {
         }
         destroyOverlay();
       } catch (error) {
-        console.error("[Pi UI Bridge] Disconnect error:", error);
+        console.error("[Codeg UI Bridge] Disconnect error:", error);
         state.statusText = "断开连接失败";
         renderAll();
       }
@@ -1329,7 +1730,7 @@ async function boot() {
       event.stopPropagation();
     });
     panelSendButton?.addEventListener("click", async () => {
-      if (!state.runtime?.config.bridgeUrl || !state.runtime.browserSessionId) {
+      if (!state.runtime?.connectionId) {
         state.statusText = t(state, "notConnected");
         renderAll();
         return;
@@ -1360,8 +1761,124 @@ async function boot() {
         return;
       }
       state.promptDraft = "";
+      resetTurnState(state);
       state.statusText = `${t(state, "sentPrefix")}: ${response.requestId}`;
       renderAll();
+    });
+  }
+
+  function renderStream() {
+    const head = panel.querySelector<HTMLElement>("#cuibStreamHead");
+    const pendingArea = panel.querySelector<HTMLElement>("#cuibPendingArea");
+    const streamBody = panel.querySelector<HTMLElement>("#cuibStreamBody");
+    if (!head || !pendingArea || !streamBody) {
+      return;
+    }
+    head.innerHTML = buildStreamHeadMarkup(state);
+    pendingArea.innerHTML = buildPendingMarkup(state);
+    streamBody.innerHTML = buildStreamMarkup(state);
+    streamBody.scrollTop = streamBody.scrollHeight;
+    bindStreamControls();
+  }
+
+  function respondWith(message: {
+    type: typeof MESSAGE_TYPES.contentRespondRequest;
+    respond:
+      | { kind: "permission"; requestId: string; optionId: string }
+      | { kind: "question"; questionId: string; labels: string[] }
+      | { kind: "question_decline"; questionId: string }
+      | { kind: "plan_approval"; approvalId: string; decision: "approve" | "request_changes" | "abandon" };
+  }): () => Promise<void> {
+    return async () => {
+      const response = await safeSendMessage<RuntimeResponse>(message);
+      state.statusText = response.ok ? t(state, "complete") : response.error || "Respond failed";
+      renderStream();
+    };
+  }
+
+  function bindStreamControls() {
+    const stopButton = panel.querySelector<HTMLButtonElement>("#cuibStopTurn");
+    stopButton?.addEventListener("click", async () => {
+      const response = await safeSendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.contentCancelTurn });
+      state.statusText = response.ok ? t(state, "stop") : response.error || "Cancel failed";
+      renderStream();
+    });
+
+    const clearButton = panel.querySelector<HTMLButtonElement>("#cuibClearStream");
+    clearButton?.addEventListener("click", () => {
+      state.stream = [];
+      if (state.turnState !== "running") {
+        state.turnState = "idle";
+        state.turnNote = "";
+      }
+      state.pendingPermission = null;
+      state.pendingQuestion = null;
+      state.pendingPlan = null;
+      renderStream();
+    });
+
+    panel.querySelectorAll<HTMLButtonElement>(".cuib-perm-option").forEach((button) => {
+      button.addEventListener("click", () => {
+        void respondWith({
+          type: MESSAGE_TYPES.contentRespondRequest,
+          respond: {
+            kind: "permission",
+            requestId: button.dataset.permRequestId || "",
+            optionId: button.dataset.permOptionId || ""
+          }
+        })();
+      });
+    });
+
+    panel.querySelectorAll<HTMLButtonElement>(".cuib-question-option").forEach((button) => {
+      button.addEventListener("click", () => {
+        const questionId = button.dataset.questionId || "";
+        const label = button.dataset.questionLabel || "";
+        const multi = Boolean(button.dataset.questionMulti);
+        if (multi) {
+          button.classList.toggle("is-active");
+          return;
+        }
+        void respondWith({
+          type: MESSAGE_TYPES.contentRespondRequest,
+          respond: { kind: "question", questionId, labels: [label] }
+        })();
+      });
+    });
+
+    panel.querySelectorAll<HTMLButtonElement>(".cuib-question-confirm").forEach((button) => {
+      button.addEventListener("click", () => {
+        const questionId = button.dataset.questionId || "";
+        const labels = Array.from(
+          panel.querySelectorAll<HTMLButtonElement>(`.cuib-question-option[data-question-id="${questionId}"].is-active`)
+        ).map((active) => active.dataset.questionLabel || "");
+        void respondWith({
+          type: MESSAGE_TYPES.contentRespondRequest,
+          respond: { kind: "question", questionId, labels }
+        })();
+      });
+    });
+
+    panel.querySelectorAll<HTMLButtonElement>(".cuib-question-decline").forEach((button) => {
+      button.addEventListener("click", () => {
+        void respondWith({
+          type: MESSAGE_TYPES.contentRespondRequest,
+          respond: { kind: "question_decline", questionId: button.dataset.questionId || "" }
+        })();
+      });
+    });
+
+    panel.querySelectorAll<HTMLButtonElement>(".cuib-plan-option").forEach((button) => {
+      button.addEventListener("click", () => {
+        void respondWith({
+          type: MESSAGE_TYPES.contentRespondRequest,
+          respond: {
+            kind: "plan_approval",
+            approvalId: button.dataset.planApprovalId || "",
+            decision: (button.dataset.planDecision as "approve" | "request_changes" | "abandon") || "approve"
+          }
+        })();
+      });
     });
   }
 
@@ -1379,17 +1896,17 @@ async function boot() {
     inlineComposer.style.left = `${next.x}px`;
     inlineComposer.style.top = `${next.y}px`;
     inlineComposer.innerHTML = `
-      <div class="piui-inline-title" data-pi-ui-bridge-ui="true">${escapeHtml(state.selectedElement ? getElementLabel(state.selectedElement) : t(state, "noSelection"))}</div>
-      <div class="piui-inline-subtitle" data-pi-ui-bridge-ui="true">${escapeHtml(state.selectedSourceHint?.file || state.selectedSourceHint?.sourceId || t(state, "noSource"))}</div>
-      <textarea id="piuiInlinePrompt" class="piui-textarea" data-pi-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "promptPlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
-      <div class="piui-inline-actions" data-pi-ui-bridge-ui="true">
-        <button id="piuiInlineSend" class="piui-button--primary" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "inlineSend"))}</button>
-        <button id="piuiInlineDom" class="piui-button--ghost" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
+      <div class="cuib-inline-title" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selectedElement ? getElementLabel(state.selectedElement) : t(state, "noSelection"))}</div>
+      <div class="cuib-inline-subtitle" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selectedSourceHint?.file || state.selectedSourceHint?.sourceId || t(state, "noSource"))}</div>
+      <textarea id="cuibInlinePrompt" class="cuib-textarea" data-codeg-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "promptPlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
+      <div class="cuib-inline-actions" data-codeg-ui-bridge-ui="true">
+        <button id="cuibInlineSend" class="cuib-button--primary" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "inlineSend"))}</button>
+        <button id="cuibInlineDom" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
       </div>
     `;
-    const prompt = inlineComposer.querySelector<HTMLTextAreaElement>("#piuiInlinePrompt");
-    const sendButton = inlineComposer.querySelector<HTMLButtonElement>("#piuiInlineSend");
-    const domButton = inlineComposer.querySelector<HTMLButtonElement>("#piuiInlineDom");
+    const prompt = inlineComposer.querySelector<HTMLTextAreaElement>("#cuibInlinePrompt");
+    const sendButton = inlineComposer.querySelector<HTMLButtonElement>("#cuibInlineSend");
+    const domButton = inlineComposer.querySelector<HTMLButtonElement>("#cuibInlineDom");
     window.requestAnimationFrame(() => {
       prompt?.focus();
       prompt?.setSelectionRange(prompt.value.length, prompt.value.length);
@@ -1418,7 +1935,7 @@ async function boot() {
       renderAll();
     });
     sendButton?.addEventListener("click", async () => {
-      if (!state.runtime?.config.bridgeUrl || !state.runtime.browserSessionId) {
+      if (!state.runtime?.connectionId) {
         state.statusText = t(state, "notConnected");
         renderAll();
         return;
@@ -1449,6 +1966,7 @@ async function boot() {
         return;
       }
       state.promptDraft = "";
+      resetTurnState(state);
       state.statusText = `${t(state, "sentPrefix")}: ${response.requestId}`;
       renderAll();
     });
@@ -1465,16 +1983,16 @@ async function boot() {
     modal.style.left = `${state.modalX}px`;
     modal.style.top = `${state.modalY}px`;
     modal.innerHTML = `
-      <div class="piui-modal-header" data-pi-ui-bridge-ui="true">
-        <div data-pi-ui-bridge-ui="true">
-          <p class="piui-eyebrow">${escapeHtml(t(state, "dom"))}</p>
-          <h2 class="piui-title">${escapeHtml(t(state, "modalTitle"))}</h2>
+      <div class="cuib-modal-header" data-codeg-ui-bridge-ui="true">
+        <div data-codeg-ui-bridge-ui="true">
+          <p class="cuib-eyebrow">${escapeHtml(t(state, "dom"))}</p>
+          <h2 class="cuib-title">${escapeHtml(t(state, "modalTitle"))}</h2>
         </div>
-        <button id="piuiCloseModal" class="piui-toggle" data-pi-ui-bridge-ui="true">${escapeHtml(t(state, "modalClose"))}</button>
+        <button id="cuibCloseModal" class="cuib-toggle" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "modalClose"))}</button>
       </div>
-      <div class="piui-modal-content" data-pi-ui-bridge-ui="true">${buildDomExplorerMarkup(state)}</div>
+      <div class="cuib-modal-content" data-codeg-ui-bridge-ui="true">${buildDomExplorerMarkup(state)}</div>
     `;
-    const modalHeader = modal.querySelector<HTMLElement>(".piui-modal-header");
+    const modalHeader = modal.querySelector<HTMLElement>(".cuib-modal-header");
     modalHeader?.addEventListener("pointerdown", (event) => {
       if (event.target instanceof HTMLElement && event.target.closest("button")) {
         return;
@@ -1482,17 +2000,17 @@ async function boot() {
       event.preventDefault();
       dragState = { startX: event.clientX, startY: event.clientY, originX: state.modalX, originY: state.modalY, target: "modal" };
     });
-    modal.querySelector<HTMLButtonElement>("#piuiCloseModal")?.addEventListener("click", () => {
+    modal.querySelector<HTMLButtonElement>("#cuibCloseModal")?.addEventListener("click", () => {
       state.domModalOpen = false;
       renderAll();
     });
-    modal.querySelector<HTMLButtonElement>("#piuiToggleChildren")?.addEventListener("click", () => {
+    modal.querySelector<HTMLButtonElement>("#cuibToggleChildren")?.addEventListener("click", () => {
       state.childrenExpanded = !state.childrenExpanded;
       renderAll();
     });
-    modal.querySelectorAll<HTMLElement>("[data-pi-node-path]").forEach((node) => {
+    modal.querySelectorAll<HTMLElement>("[data-codeg-node-path]").forEach((node) => {
       node.addEventListener("click", () => {
-        const domPath = node.dataset.piNodePath || "";
+        const domPath = node.dataset.codegNodePath || "";
         const target = findElementByDomPath(domPath);
         if (!target) {
           state.statusText = t(state, "treeRelocateFailed");
@@ -1509,6 +2027,7 @@ async function boot() {
     renderPanel();
     renderInlineComposer();
     renderDomModal();
+    renderStream();
     syncFrames();
   }
 
@@ -1545,14 +2064,14 @@ async function boot() {
     state.childrenExpanded = false;
     state.composerOpen = true;
     state.statusText = t(state, "selectedRecorded");
-    window.__PI_UI_BRIDGE_LAST_SELECTION__ = {
+    window.__CODEG_UI_BRIDGE_LAST_SELECTION__ = {
       pageUrl: window.location.href,
       selection: state.selectedSelection,
       sourceHint: state.selectedSourceHint
     };
     renderAll();
 
-    if (syncRemote && state.runtime?.config.bridgeUrl && state.runtime.browserSessionId) {
+    if (syncRemote && state.runtime?.connectionId) {
       void safeSendMessage<RuntimeResponse>({
         type: MESSAGE_TYPES.contentSelectionSync,
         pageUrl: window.location.href,
@@ -1564,10 +2083,10 @@ async function boot() {
 
   async function loadRuntime() {
     const response = await safeSendMessage<RuntimeResponse>({
-      type: MESSAGE_TYPES.contentGetBridgeRuntime
+      type: MESSAGE_TYPES.contentGetRuntime
     });
 
-    const hasActiveConnection = Boolean(response.runtime?.config.bridgeUrl && response.runtime?.browserSessionId);
+    const hasActiveConnection = Boolean(response.runtime?.connectionId);
     if (!hasActiveConnection) {
       destroyOverlay();
       return;
@@ -1583,7 +2102,7 @@ async function boot() {
     }
 
     state.runtime = response.runtime ?? null;
-    state.statusText = `${t(state, "connectedPrefix")}: ${response.runtime?.browserSessionId}`;
+    state.statusText = `${t(state, "connectedPrefix")}: ${response.runtime?.connectionId}`;
     renderAll();
   }
 
@@ -1726,7 +2245,7 @@ async function boot() {
     window.removeEventListener("resize", handleWindowResize);
     window.removeEventListener("scroll", handleWindowScroll, true);
     host.remove();
-    window.__PI_UI_BRIDGE_CONTENT_BOOTED__ = false;
+    window.__CODEG_UI_BRIDGE_CONTENT_BOOTED__ = false;
   }
 
   modalMask.addEventListener("click", handleModalMaskClick);
@@ -1739,14 +2258,14 @@ async function boot() {
 
   document.addEventListener("focusin", (event) => {
     const target = event.target;
-    if (target instanceof HTMLTextAreaElement && (target.id === "piuiPanelPrompt" || target.id === "piuiInlinePrompt")) {
+    if (target instanceof HTMLTextAreaElement && (target.id === "cuibPanelPrompt" || target.id === "cuibInlinePrompt")) {
       event.stopPropagation();
     }
   }, true);
 
   document.addEventListener("focusout", (event) => {
     const target = event.target;
-    if (target instanceof HTMLTextAreaElement && (target.id === "piuiPanelPrompt" || target.id === "piuiInlinePrompt")) {
+    if (target instanceof HTMLTextAreaElement && (target.id === "cuibPanelPrompt" || target.id === "cuibInlinePrompt")) {
       const activeDialog = getActiveDialogRoot();
       if (activeDialog) {
         event.preventDefault();
@@ -1764,6 +2283,15 @@ async function boot() {
   window.addEventListener("pointerup", handleWindowPointerUp);
   window.addEventListener("resize", handleWindowResize);
   window.addEventListener("scroll", handleWindowScroll, true);
+
+  chrome.runtime.onMessage.addListener((message: unknown) => {
+    const agentMessage = message as ContentAgentEventMessage | undefined;
+    if (agentMessage && agentMessage.type === MESSAGE_TYPES.contentAgentEvent && agentMessage.event) {
+      applyAgentEventToState(state, agentMessage.event);
+      renderStream();
+    }
+    return false;
+  });
 
   await loadRuntime();
 }

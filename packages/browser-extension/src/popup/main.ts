@@ -1,5 +1,13 @@
 import { MESSAGE_TYPES } from "../messages";
-import type { BridgeConfig, RuntimeResponse } from "../messages";
+import type { BridgeConfig, CodegProject, RuntimeResponse } from "../messages";
+
+const FALLBACK_AGENTS = [
+  { agentType: "pi", name: "pi" },
+  { agentType: "claude_code", name: "claude_code" },
+  { agentType: "codex", name: "codex" },
+  { agentType: "gemini", name: "gemini" },
+  { agentType: "open_code", name: "open_code" }
+];
 
 function sendMessage<T extends RuntimeResponse>(message: object): Promise<T> {
   return chrome.runtime.sendMessage(message);
@@ -10,175 +18,322 @@ async function getCurrentTab(): Promise<chrome.tabs.Tab | null> {
   return tab ?? null;
 }
 
-function render(
-  root: HTMLElement,
-  state: {
-    config: BridgeConfig;
-    message: string;
-    error: string;
-    busy: boolean;
-    connected: boolean;
-    browserSessionId: string;
-    attachedPageUrl: string;
-  }
-) {
+type PopupState = {
+  config: BridgeConfig;
+  agents: { agentType: string; name: string }[];
+  folders: CodegProject[];
+  codegVersion: string;
+  message: string;
+  error: string;
+  busy: boolean;
+  connected: boolean;
+  connectionId: string;
+  attachedPageUrl: string;
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function render(root: HTMLElement, state: PopupState) {
+  const agentOptions = (state.agents.length ? state.agents : FALLBACK_AGENTS)
+    .map(
+      (agent) =>
+        `<option value="${escapeHtml(agent.agentType)}" ${agent.agentType === state.config.agentType ? "selected" : ""}>${escapeHtml(
+          agent.name || agent.agentType
+        )}</option>`
+    )
+    .join("");
+
+  const folderOptions = state.folders
+    .map(
+      (folder) =>
+        `<option value="${folder.folderId}" ${folder.folderId === state.config.project?.folderId ? "selected" : ""}>${escapeHtml(
+          `${folder.folderName} (${folder.folderPath})`
+        )}</option>`
+    )
+    .join("");
+
   root.innerHTML = `
-    <div style="font-family: ui-sans-serif, system-ui; width: 360px; padding: 16px; box-sizing: border-box; color: #111827;">
-      <h2 style="margin: 0 0 12px; font-size: 18px;">Pi UI Bridge</h2>
+    <div style="font-family: ui-sans-serif, system-ui; width: 380px; padding: 16px; box-sizing: border-box; color: #111827;">
+      <h2 style="margin: 0 0 4px; font-size: 18px;">Codeg UI Bridge</h2>
+      <div style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
+        ${state.codegVersion ? `Codeg v${escapeHtml(state.codegVersion)}` : "未连接 Codeg"}
+      </div>
       <div style="display:grid; gap:8px; margin-bottom:12px; padding:10px; border-radius:10px; background:#f8fafc; border:1px solid #e2e8f0; font-size:12px;">
         <div><strong>状态:</strong> ${state.connected ? "已连接" : "未连接"}</div>
-        <div><strong>browserSessionId:</strong> ${state.browserSessionId || "(none)"}</div>
-        <div><strong>页面:</strong> ${state.attachedPageUrl || "(none)"}</div>
+        ${state.connectionId ? `<div><strong>connectionId:</strong> ${escapeHtml(state.connectionId)}</div>` : ""}
+        <div><strong>页面:</strong> ${state.attachedPageUrl ? escapeHtml(state.attachedPageUrl) : "(none)"}</div>
       </div>
       <div style="display: grid; gap: 10px;">
-        <label style="display:grid; gap:4px; font-size:12px;">
-          <span>Bridge URL</span>
-          <input id="bridgeUrl" value="${state.config.bridgeUrl}" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
-        </label>
+        <div style="display:grid; grid-template-columns: 1fr 88px; gap:8px;">
+          <label style="display:grid; gap:4px; font-size:12px;">
+            <span>Codeg IP</span>
+            <input id="host" value="${escapeHtml(state.config.host)}" placeholder="127.0.0.1" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
+          </label>
+          <label style="display:grid; gap:4px; font-size:12px;">
+            <span>端口</span>
+            <input id="port" value="${escapeHtml(state.config.port)}" placeholder="23080" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
+          </label>
+        </div>
         <label style="display:grid; gap:4px; font-size:12px;">
           <span>Token</span>
-          <input id="token" value="${state.config.token}" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
+          <input id="token" type="password" value="${escapeHtml(state.config.token)}" placeholder="Codeg Web 服务 Token" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
+        </label>
+        <label style="display:grid; gap:4px; font-size:12px;">
+          <span>智能体（用于修改开发）</span>
+          <select id="agent" style="padding:8px; border:1px solid #d1d5db; border-radius:8px; background:white;">${agentOptions}</select>
+        </label>
+        <label style="display:grid; gap:4px; font-size:12px;">
+          <span>所属项目（Codeg 文件夹）</span>
+          <select id="folder" style="padding:8px; border:1px solid #d1d5db; border-radius:8px; background:white;">
+            <option value="">${state.folders.length ? "-- 选择项目 --" : "-- Codeg 中暂无项目，可手动输入路径 --"}</option>
+            ${folderOptions}
+          </select>
+        </label>
+        <label style="display:grid; gap:4px; font-size:12px;">
+          <span>或手动输入项目路径</span>
+          <input id="manualPath" placeholder="D:/path/to/project" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
         </label>
         <div style="display:flex; gap:8px;">
-          <button id="saveBtn" style="flex:1; padding:10px; border:none; border-radius:8px; background:#111827; color:white;">保存配置</button>
-          <button id="attachBtn" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:8px; background:white;">连接页面</button>
+          <button id="testBtn" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:8px; background:white;">测试连接</button>
+          <button id="attachBtn" style="flex:1; padding:10px; border:none; border-radius:8px; background:#111827; color:white;">连接页面</button>
         </div>
-        <div style="font-size:12px; color:${state.error ? "#b91c1c" : "#374151"}; min-height: 18px;">${state.error || state.message}</div>
+        <div style="font-size:12px; color:${state.error ? "#b91c1c" : "#374151"}; min-height: 18px;">${escapeHtml(state.error || state.message)}</div>
       </div>
     </div>
   `;
 }
 
 async function boot() {
-  const root = document.getElementById("app");
-  if (!root) {
+  const rootCandidate = document.getElementById("app");
+  if (!rootCandidate) {
     return;
   }
+  const root: HTMLElement = rootCandidate;
 
-  let config: BridgeConfig = { bridgeUrl: "", token: "" };
-  let message = "填写本地 pi bridge 地址与 token";
-  let error = "";
-  let busy = false;
-  let connected = false;
-  let browserSessionId = "";
-  let attachedPageUrl = "";
-
-  const loaded = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupGetBridgeConfig });
-  if (loaded.config) {
-    config = loaded.config;
-  }
-  connected = Boolean(loaded.connected);
-  browserSessionId = loaded.browserSessionId || "";
-  attachedPageUrl = loaded.attachedPageUrl || "";
-
-  const rerender = () => {
-    render(root, { config, message, error, busy, connected, browserSessionId, attachedPageUrl });
-
-    const bridgeUrlInput = root.querySelector<HTMLInputElement>("#bridgeUrl");
-    const tokenInput = root.querySelector<HTMLInputElement>("#token");
-    const saveBtn = root.querySelector<HTMLButtonElement>("#saveBtn");
-    const attachBtn = root.querySelector<HTMLButtonElement>("#attachBtn");
-
-    if (!bridgeUrlInput || !tokenInput || !saveBtn || !attachBtn) {
-      return;
-    }
-
-    bridgeUrlInput.oninput = () => {
-      config = { ...config, bridgeUrl: bridgeUrlInput.value };
-    };
-
-    tokenInput.oninput = () => {
-      config = { ...config, token: tokenInput.value };
-    };
-
-    saveBtn.onclick = async () => {
-      busy = true;
-      error = "";
-      message = "正在保存配置...";
-      rerender();
-
-      const response = await sendMessage<RuntimeResponse>({
-        type: MESSAGE_TYPES.popupSaveBridgeConfig,
-        config
-      });
-
-      busy = false;
-      if (!response.ok) {
-        error = response.error || "保存失败";
-        message = "";
-      } else {
-        message = "配置已保存";
-        error = "";
-      }
-      rerender();
-    };
-
-    attachBtn.onclick = async () => {
-      config = {
-        bridgeUrl: bridgeUrlInput.value.trim(),
-        token: tokenInput.value.trim()
-      };
-
-      if (!config.bridgeUrl || !config.token) {
-        error = "请先填写 bridgeUrl 和 token";
-        message = "";
-        rerender();
-        return;
-      }
-
-      busy = true;
-      error = "";
-      message = "正在保存并连接当前页面...";
-      rerender();
-
-      const saved = await sendMessage<RuntimeResponse>({
-        type: MESSAGE_TYPES.popupSaveBridgeConfig,
-        config
-      });
-
-      if (!saved.ok) {
-        busy = false;
-        error = saved.error || "保存配置失败";
-        message = "";
-        rerender();
-        return;
-      }
-
-      const tab = await getCurrentTab();
-      if (!tab?.url || !tab.id) {
-        busy = false;
-        error = "未找到当前页面";
-        message = "";
-        rerender();
-        return;
-      }
-
-      const response = await sendMessage<RuntimeResponse>({
-        type: MESSAGE_TYPES.popupAttachBridge,
-        tabId: tab.id,
-        pageUrl: tab.url,
-        pageTitle: tab.title
-      });
-
-      busy = false;
-      if (!response.ok) {
-        error = response.error || "连接失败";
-        message = "";
-      } else {
-        connected = Boolean(response.connected);
-        browserSessionId = response.browserSessionId || "";
-        attachedPageUrl = response.attachedPageUrl || tab.url;
-        message = `已连接，browserSessionId: ${response.browserSessionId}`;
-        error = "";
-      }
-      rerender();
-    };
-
-    saveBtn.disabled = busy;
-    attachBtn.disabled = busy;
+  const tab = await getCurrentTab();
+  const state: PopupState = {
+    config: { host: "127.0.0.1", port: "23080", token: "", agentType: "pi", project: null },
+    agents: [],
+    folders: [],
+    codegVersion: "",
+    message: "填写 Codeg 地址与 Token，选择项目和智能体后连接页面",
+    error: "",
+    busy: false,
+    connected: false,
+    connectionId: "",
+    attachedPageUrl: ""
   };
 
-  rerender();
+  const loaded = await sendMessage<RuntimeResponse>({
+    type: MESSAGE_TYPES.popupGetConfig,
+    pageUrl: tab?.url
+  });
+  if (loaded.config) {
+    state.config = loaded.config;
+  }
+  if (loaded.agentPref) {
+    state.config.agentType = loaded.agentPref;
+  }
+  if (loaded.projectPref) {
+    state.config.project = loaded.projectPref;
+  }
+  state.connected = Boolean(loaded.connected);
+  state.connectionId = loaded.connectionId || "";
+  state.attachedPageUrl = loaded.attachedPageUrl || "";
+
+  async function loadCodegInfo(): Promise<void> {
+    const response = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupLoadCodegInfo });
+    if (response.ok) {
+      state.agents = response.agents ?? [];
+      state.folders = response.folders ?? [];
+      state.codegVersion = response.codegVersion || "";
+      if (!state.config.agentType && state.agents.length > 0) {
+        state.config.agentType = state.agents[0]!.agentType;
+      }
+    } else if (response.error) {
+      state.error = response.error;
+    }
+  }
+
+  type ReadFieldsResult = { ok: true; manualPath?: string } | { ok: false; error: string };
+
+  function readFields(config: BridgeConfig): ReadFieldsResult {
+    const hostInput = root.querySelector<HTMLInputElement>("#host");
+    const portInput = root.querySelector<HTMLInputElement>("#port");
+    const tokenInput = root.querySelector<HTMLInputElement>("#token");
+    const agentSelect = root.querySelector<HTMLSelectElement>("#agent");
+    const folderSelect = root.querySelector<HTMLSelectElement>("#folder");
+    const manualPathInput = root.querySelector<HTMLInputElement>("#manualPath");
+
+    if (!hostInput || !portInput || !tokenInput || !agentSelect || !folderSelect || !manualPathInput) {
+      return { ok: false, error: "popup 渲染异常" };
+    }
+
+    config.host = hostInput.value.trim() || "127.0.0.1";
+    config.port = portInput.value.trim() || "23080";
+    config.token = tokenInput.value.trim();
+    config.agentType = agentSelect.value || "pi";
+    if (!config.token) {
+      return { ok: false, error: "请填写 Token" };
+    }
+
+    const manualPath = manualPathInput.value.trim();
+    if (manualPath) {
+      config.project = {
+        folderId: -1,
+        folderName: manualPath.split(/[\\/]/).filter(Boolean).pop() || manualPath,
+        folderPath: manualPath
+      };
+      return { ok: true, manualPath };
+    }
+
+    if (folderSelect.value) {
+      const selected = state.folders.find((folder) => String(folder.folderId) === folderSelect.value);
+      if (selected) {
+        config.project = selected;
+        return { ok: true };
+      }
+    }
+
+    if (config.project) {
+      return { ok: true };
+    }
+
+    return { ok: false, error: "请选择项目或输入项目路径" };
+  }
+
+  /** Registers a manually-typed path in Codeg so the project gets a real folder id. */
+  async function resolveProject(config: BridgeConfig, manualPath?: string): Promise<string | null> {
+    if (!manualPath || !config.project) {
+      return null;
+    }
+    const opened = await sendMessage<RuntimeResponse>({
+      type: MESSAGE_TYPES.popupOpenFolder,
+      path: config.project.folderPath
+    });
+    if (!opened.ok || !opened.project) {
+      return opened.error || "打开项目路径失败";
+    }
+    config.project = opened.project;
+    return null;
+  }
+
+  function bindEvents() {
+    const testBtn = root.querySelector<HTMLButtonElement>("#testBtn");
+    const attachBtn = root.querySelector<HTMLButtonElement>("#attachBtn");
+
+    const rerender = () => {
+      render(root, state);
+      bindEvents();
+    };
+
+    const withBusy = async (label: string, action: () => Promise<void>) => {
+      state.busy = true;
+      state.error = "";
+      state.message = label;
+      rerender();
+      await action();
+      state.busy = false;
+      rerender();
+    };
+
+    if (testBtn) {
+      testBtn.disabled = state.busy;
+      testBtn.onclick = () =>
+        void withBusy("正在连接 Codeg...", async () => {
+          const config = { ...state.config };
+          const fields = readFields(config);
+          if (!fields.ok) {
+            state.error = fields.error;
+            return;
+          }
+          const resolveError = await resolveProject(config, fields.manualPath);
+          if (resolveError) {
+            state.error = resolveError;
+            return;
+          }
+          const saved = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupSaveConfig, config });
+          if (!saved.ok) {
+            state.error = saved.error || "保存失败";
+            return;
+          }
+          state.config = config;
+          const tested = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupTestConnection });
+          if (!tested.ok) {
+            state.error = tested.error || "连接失败";
+            return;
+          }
+          state.codegVersion = tested.codegVersion || "";
+          state.message = `Codeg 连接成功${tested.codegVersion ? `（v${tested.codegVersion}）` : ""}`;
+          await loadCodegInfo();
+        });
+    }
+
+    if (attachBtn) {
+      attachBtn.disabled = state.busy;
+      attachBtn.onclick = () =>
+        void withBusy("正在保存并连接当前页面...", async () => {
+          const config = { ...state.config };
+          const fields = readFields(config);
+          if (!fields.ok) {
+            state.error = fields.error;
+            return;
+          }
+          const resolveError = await resolveProject(config, fields.manualPath);
+          if (resolveError) {
+            state.error = resolveError;
+            return;
+          }
+          if (!config.project) {
+            state.error = "请选择项目或输入项目路径";
+            return;
+          }
+
+          const saved = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupSaveConfig, config });
+          if (!saved.ok) {
+            state.error = saved.error || "保存失败";
+            return;
+          }
+          state.config = config;
+
+          if (!tab?.url || tab.id == null) {
+            state.error = "未找到当前页面";
+            return;
+          }
+
+          const response = await sendMessage<RuntimeResponse>({
+            type: MESSAGE_TYPES.popupAttachPage,
+            tabId: tab.id,
+            pageUrl: tab.url,
+            pageTitle: tab.title
+          });
+
+          if (!response.ok) {
+            state.error = response.error || "连接失败";
+            return;
+          }
+          state.connected = true;
+          state.connectionId = response.connectionId || "";
+          state.attachedPageUrl = response.attachedPageUrl || tab.url;
+          state.codegVersion = response.codegVersion || state.codegVersion;
+          state.message = "已连接，页面上出现面板后即可选中元素发送需求";
+        });
+    }
+  }
+
+  if (state.config.host && state.config.port && state.config.token) {
+    await loadCodegInfo();
+  }
+
+  render(root, state);
+  bindEvents();
 }
 
 void boot();

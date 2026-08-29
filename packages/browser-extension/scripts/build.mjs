@@ -13,7 +13,7 @@ const watchMode = process.argv.includes("--watch");
 const aliasPlugin = {
   name: "workspace-alias",
   setup(buildContext) {
-    buildContext.onResolve({ filter: /^@pi-ui-bridge\/bridge-core$/ }, () => ({
+    buildContext.onResolve({ filter: /^@codeg-ui-bridge\/bridge-core$/ }, () => ({
       path: path.resolve(packageRoot, "../bridge-core/src/index.ts")
     }));
   }
@@ -60,16 +60,16 @@ async function runBuild() {
   if (watchMode) {
     const contexts = await Promise.all(buildTargets.map((target) => context({ ...baseConfig, ...target })));
     await Promise.all(contexts.map((buildContext) => buildContext.watch()));
-    console.log(`[Pi UI Bridge] browser extension watching: ${distDir}`);
+    console.log(`[Codeg UI Bridge] browser extension watching: ${distDir}`);
     return;
   }
 
   await Promise.all(buildTargets.map((target) => build({ ...baseConfig, ...target })));
-  console.log(`[Pi UI Bridge] browser extension built: ${distDir}`);
+  console.log(`[Codeg UI Bridge] browser extension built: ${distDir}`);
 }
 
 runBuild().catch((error) => {
-  console.error("[Pi UI Bridge] browser extension build failed");
+  console.error("[Codeg UI Bridge] browser extension build failed");
   console.error(error);
   process.exitCode = 1;
 });

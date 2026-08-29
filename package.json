@@ -1,37 +1,23 @@
 {
-  "name": "pi-ui-bridge",
-  "version": "0.1.0",
+  "name": "codeg-ui-bridge",
+  "version": "0.2.0",
   "private": false,
-  "description": "UI-to-code bridge for pi-coding-agent",
+  "description": "UI-to-code bridge for Codeg",
   "packageManager": "pnpm@9.15.0",
   "keywords": [
-    "pi-package",
-    "pi-coding-agent",
+    "codeg",
     "browser-extension",
     "ui-runtime",
     "source-binding"
   ],
   "scripts": {
     "typecheck": "pnpm -r typecheck",
-    "build:browser-extension": "pnpm --filter @pi-ui-bridge/browser-extension build",
-    "dev:react-demo": "pnpm --filter @pi-ui-bridge/react-vite-demo dev",
-    "install:pi": "node ./scripts/install-to-pi.mjs",
-    "uninstall:pi": "node ./scripts/uninstall-from-pi.mjs",
-    "lint": "echo 'lint not configured yet'",
-    "dev": "echo 'dev entry will be added in v0.1 implementation'"
+    "build:browser-extension": "pnpm --filter @codeg-ui-bridge/browser-extension build",
+    "dev:react-demo": "pnpm --filter @codeg-ui-bridge/react-vite-demo dev",
+    "lint": "echo 'lint not configured yet'"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "^0.34.41",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.3"
-  },
-  "pi": {
-    "extensions": [
-      "./extensions"
-    ],
-    "skills": [
-      "./skills"
-    ]
   }
 }

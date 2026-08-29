@@ -6,7 +6,7 @@
 
 - source binder metadata 注入
 - browser extension 元素选中
-- Pi UI Bridge 请求链路
+- Codeg UI Bridge 请求链路
 
 ## 启动
 
@@ -16,8 +16,8 @@ pnpm dev:react-demo
 
 启动后可在页面中检查节点是否带有：
 
-- `data-pi-source-id`
-- `data-pi-source-file`
-- `data-pi-source-line`
-- `data-pi-source-column`
-- `data-pi-component`
+- `data-codeg-source-id`
+- `data-codeg-source-file`
+- `data-codeg-source-line`
+- `data-codeg-source-column`
+- `data-codeg-component`

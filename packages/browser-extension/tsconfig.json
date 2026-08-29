@@ -5,7 +5,7 @@
     "types": ["chrome"],
     "baseUrl": ".",
     "paths": {
-      "@pi-ui-bridge/bridge-core": ["../bridge-core/src/index.ts"]
+      "@codeg-ui-bridge/bridge-core": ["../bridge-core/src/index.ts"]
     }
   },
   "include": ["src"]

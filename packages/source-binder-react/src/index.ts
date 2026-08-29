@@ -32,9 +32,9 @@ function isIntrinsicElement(node: JSXOpeningElement): boolean {
   return isIdentifierName(node.name) && /^[a-z]/.test(node.name.name);
 }
 
-function hasPiSourceAttribute(node: JSXOpeningElement): boolean {
+function hasCodegSourceAttribute(node: JSXOpeningElement): boolean {
   return node.attributes.some((attribute): attribute is JSXAttribute => {
-    return attribute.type === "JSXAttribute" && isIdentifierName(attribute.name) && attribute.name.name === "data-pi-source-id";
+    return attribute.type === "JSXAttribute" && isIdentifierName(attribute.name) && attribute.name.name === "data-codeg-source-id";
   });
 }
 
@@ -69,11 +69,11 @@ function getNamedComponent(pathLike: NodePath<JSXOpeningElement>, fallback: stri
   return fallback;
 }
 
-export function piSourceBinderReact(options: SourceBinderReactOptions = {}) {
+export function codegSourceBinderReact(options: SourceBinderReactOptions = {}) {
   let viteRoot = options.root ? toPosix(options.root) : process.cwd();
 
   return {
-    name: "pi-source-binder-react",
+    name: "codeg-source-binder-react",
     apply: "serve" as const,
     enforce: "pre" as const,
     configResolved(config: { root: string }) {
@@ -107,7 +107,7 @@ export function piSourceBinderReact(options: SourceBinderReactOptions = {}) {
       traverse(ast, {
         JSXOpeningElement(openingPath: NodePath<JSXOpeningElement>) {
           const node = openingPath.node;
-          if (!isIntrinsicElement(node) || hasPiSourceAttribute(node)) {
+          if (!isIntrinsicElement(node) || hasCodegSourceAttribute(node)) {
             return;
           }
 
@@ -122,11 +122,11 @@ export function piSourceBinderReact(options: SourceBinderReactOptions = {}) {
           const column = location.column + 1;
           const sourceId = `${relativeFile}:${line}:${column}`;
           const attrs = [
-            ` data-pi-source-id="${escapeAttribute(sourceId)}"`,
-            ` data-pi-source-file="${escapeAttribute(relativeFile)}"`,
-            ` data-pi-source-line="${line}"`,
-            ` data-pi-source-column="${column}"`,
-            ` data-pi-component="${escapeAttribute(componentName)}"`
+            ` data-codeg-source-id="${escapeAttribute(sourceId)}"`,
+            ` data-codeg-source-file="${escapeAttribute(relativeFile)}"`,
+            ` data-codeg-source-line="${line}"`,
+            ` data-codeg-source-column="${column}"`,
+            ` data-codeg-component="${escapeAttribute(componentName)}"`
           ].join("");
 
           magicString.appendLeft(insertAt, attrs);

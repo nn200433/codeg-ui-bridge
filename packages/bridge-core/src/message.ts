@@ -4,11 +4,11 @@ function quote(value: string | undefined): string {
   return value && value.trim() ? value.trim() : "(none)";
 }
 
-export function buildPiBridgePrompt(payload: ApplyRequest): string {
+export function buildBridgePrompt(payload: ApplyRequest): string {
   const { pageUrl, selection, intent, sourceHint } = payload;
 
   const lines = [
-    "来自 Pi UI Bridge 的页面改动请求。",
+    "来自 Codeg UI Bridge 的页面改动请求。",
     "",
     "页面信息：",
     `- URL: ${quote(pageUrl)}`,
