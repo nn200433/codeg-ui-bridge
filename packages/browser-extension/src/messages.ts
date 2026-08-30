@@ -3,7 +3,6 @@ export const MESSAGE_TYPES = {
   popupGetConfig: "codeg/popup/get-config",
   popupTestConnection: "codeg/popup/test-connection",
   popupLoadCodegInfo: "codeg/popup/load-codeg-info",
-  popupOpenFolder: "codeg/popup/open-folder",
   popupAttachPage: "codeg/popup/attach-page",
   popupApplyCurrentSelection: "codeg/popup/apply-current-selection",
   contentGetRuntime: "codeg/content/get-runtime",
@@ -40,7 +39,6 @@ export type CodegAgentOption = {
   agentType: string;
   name: string;
   description?: string;
-  available: boolean;
   installedVersion?: string | null;
 };
 
@@ -116,11 +114,6 @@ export type PopupLoadCodegInfoRequest = {
   type: typeof MESSAGE_TYPES.popupLoadCodegInfo;
 };
 
-export type PopupOpenFolderRequest = {
-  type: typeof MESSAGE_TYPES.popupOpenFolder;
-  path: string;
-};
-
 export type PopupAttachPageRequest = {
   type: typeof MESSAGE_TYPES.popupAttachPage;
   tabId: number;
@@ -180,7 +173,6 @@ export type RuntimeRequest =
   | PopupGetConfigRequest
   | PopupTestConnectionRequest
   | PopupLoadCodegInfoRequest
-  | PopupOpenFolderRequest
   | PopupAttachPageRequest
   | PopupApplyCurrentSelectionRequest
   | ContentGetRuntimeRequest
@@ -207,5 +199,4 @@ export type RuntimeResponse = {
   folders?: CodegProject[];
   projectPref?: CodegProject | null;
   agentPref?: string;
-  project?: CodegProject;
 };

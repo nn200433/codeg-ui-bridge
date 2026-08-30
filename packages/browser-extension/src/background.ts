@@ -745,7 +745,6 @@ async function handleLoadCodegInfo(): Promise<RuntimeResponse> {
         agentType: String(agent.agent_type ?? ""),
         name: String(agent.name ?? agent.agent_type ?? ""),
         description: typeof agent.description === "string" ? agent.description : undefined,
-        available: agent.available !== false,
         installedVersion: agent.installed_version ?? null
       }));
     return {
@@ -795,25 +794,6 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
     }
     case MESSAGE_TYPES.popupLoadCodegInfo:
       return handleLoadCodegInfo();
-    case MESSAGE_TYPES.popupOpenFolder: {
-      const config = await getConfig();
-      if (!hasEndpoint(config)) {
-        return { ok: false, error: "请先填写 Codeg IP、端口与 Token" };
-      }
-      try {
-        const folder = await getClient(config).openFolder(message.path);
-        return {
-          ok: true,
-          project: {
-            folderId: folder.id,
-            folderName: folder.name,
-            folderPath: folder.path
-          }
-        };
-      } catch (error) {
-        return { ok: false, error: friendlyError(error) };
-      }
-    }
     case MESSAGE_TYPES.popupAttachPage:
       return handleAttachPage(message.tabId, message.pageUrl, message.pageTitle);
     case MESSAGE_TYPES.popupApplyCurrentSelection: {
