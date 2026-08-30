@@ -36,6 +36,14 @@ export type BridgeRuntime = {
   workingDir: string;
 };
 
+export type CodegAgentOption = {
+  agentType: string;
+  name: string;
+  description?: string;
+  available: boolean;
+  installedVersion?: string | null;
+};
+
 export type CodegVersionInfo = {
   status?: string;
   version?: string;
@@ -195,7 +203,7 @@ export type RuntimeResponse = {
   isCurrentTabAttached?: boolean;
   connectionId?: string;
   codegVersion?: string;
-  agents?: { agentType: string; name: string }[];
+  agents?: CodegAgentOption[];
   folders?: CodegProject[];
   projectPref?: CodegProject | null;
   agentPref?: string;

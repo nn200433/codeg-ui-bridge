@@ -6,10 +6,12 @@ export type CodegHealth = {
 };
 
 export type CodegAgentInfo = {
-  agentType?: string;
-  name?: string;
+  agent_type: string;
+  name: string;
+  description?: string;
   enabled?: boolean;
-  installedVersion?: string | null;
+  available?: boolean;
+  installed_version?: string | null;
 } & Record<string, unknown>;
 
 export type CodegFolderInfo = {

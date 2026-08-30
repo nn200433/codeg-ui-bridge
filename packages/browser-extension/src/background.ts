@@ -79,7 +79,7 @@ async function getConfig(): Promise<BridgeConfig> {
       host: "127.0.0.1",
       port: "23080",
       token: "",
-      agentType: "pi",
+      agentType: "",
       project: null
     }
   );
@@ -191,7 +191,10 @@ async function ensureConnection(config: BridgeConfig): Promise<ConnectionRecord>
   }
 
   const workingDir = config.project?.folderPath || "";
-  const agentType = config.agentType || "pi";
+  const agentType = config.agentType;
+  if (!agentType) {
+    throw new Error("请先在 popup 中选择智能体");
+  }
 
   const attemptConnect = async (sessionId?: string): Promise<string> =>
     client.connect(agentType, workingDir || undefined, sessionId);
@@ -734,10 +737,17 @@ async function handleLoadCodegInfo(): Promise<RuntimeResponse> {
     const projects: CodegProject[] = folders
       .filter((folder) => folder.kind !== "chat")
       .map((folder) => ({ folderId: folder.id, folderName: folder.name, folderPath: folder.path }));
-    const agentList = agents.map((agent) => ({
-      agentType: String((agent as { agentType?: string }).agentType ?? (agent as { agent_type?: string }).agent_type ?? ""),
-      name: String(agent.name ?? (agent as { agent_type?: string }).agent_type ?? "")
-    }));
+    // Only agents the user explicitly enabled in Codeg are offered; the full
+    // registry (including disabled entries) is never surfaced here.
+    const agentList = agents
+      .filter((agent) => agent.enabled === true)
+      .map((agent) => ({
+        agentType: String(agent.agent_type ?? ""),
+        name: String(agent.name ?? agent.agent_type ?? ""),
+        description: typeof agent.description === "string" ? agent.description : undefined,
+        available: agent.available !== false,
+        installedVersion: agent.installed_version ?? null
+      }));
     return {
       ok: true,
       codegVersion: health.version,

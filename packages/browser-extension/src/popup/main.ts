@@ -1,13 +1,5 @@
 import { MESSAGE_TYPES } from "../messages";
-import type { BridgeConfig, CodegProject, RuntimeResponse } from "../messages";
-
-const FALLBACK_AGENTS = [
-  { agentType: "pi", name: "pi" },
-  { agentType: "claude_code", name: "claude_code" },
-  { agentType: "codex", name: "codex" },
-  { agentType: "gemini", name: "gemini" },
-  { agentType: "open_code", name: "open_code" }
-];
+import type { BridgeConfig, CodegAgentOption, CodegProject, RuntimeResponse } from "../messages";
 
 function sendMessage<T extends RuntimeResponse>(message: object): Promise<T> {
   return chrome.runtime.sendMessage(message);
@@ -20,7 +12,7 @@ async function getCurrentTab(): Promise<chrome.tabs.Tab | null> {
 
 type PopupState = {
   config: BridgeConfig;
-  agents: { agentType: string; name: string }[];
+  agents: CodegAgentOption[];
   folders: CodegProject[];
   codegVersion: string;
   message: string;
@@ -40,28 +32,119 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function render(root: HTMLElement, state: PopupState) {
-  // 智能体与项目列表都需要连上 Codeg 才能读取；连通前智能体用内置兜底列表。
-  const usingFallbackAgents = state.agents.length === 0;
-  const agentOptions = (state.agents.length ? state.agents : FALLBACK_AGENTS)
-    .map(
-      (agent) =>
-        `<option value="${escapeHtml(agent.agentType)}" ${agent.agentType === state.config.agentType ? "selected" : ""}>${escapeHtml(
-          agent.name || agent.agentType
-        )}</option>`
-    )
-    .join("");
+type ComboOption = { value: string; label: string; sub?: string };
 
-  const folderOptions = state.folders
-    .map(
-      (folder) =>
-        `<option value="${folder.folderId}" ${folder.folderId === state.config.project?.folderId ? "selected" : ""}>${escapeHtml(
-          `${folder.folderName} (${folder.folderPath})`
-        )}</option>`
-    )
-    .join("");
+/**
+ * Minimal searchable combobox. Options can only come from a live Codeg
+ * connection, so while the option list is empty the input stays disabled.
+ * Typing filters by label/value/sub (case-insensitive substring).
+ */
+function bindCombo(
+  scope: HTMLElement,
+  comboId: string,
+  options: ComboOption[],
+  currentLabel: string,
+  disabledPlaceholder: string,
+  onPick: (value: string) => void
+): void {
+  const box = scope.querySelector<HTMLDivElement>(`#${comboId}`);
+  const input = box?.querySelector<HTMLInputElement>("input");
+  const list = box?.querySelector<HTMLDivElement>(".combo-list");
+  if (!box || !input || !list) {
+    return;
+  }
+
+  if (options.length === 0) {
+    input.disabled = true;
+    input.value = "";
+    input.placeholder = disabledPlaceholder;
+    return;
+  }
+
+  input.disabled = false;
+  input.placeholder = "输入筛选";
+  input.value = currentLabel;
+
+  const renderList = (filterOverride?: string) => {
+    const filter = (filterOverride ?? input.value).trim().toLowerCase();
+    const items = options.filter((option) =>
+      !filter ? true : `${option.label} ${option.value} ${option.sub ?? ""}`.toLowerCase().includes(filter)
+    );
+    list.innerHTML = items.length
+      ? items
+          .map(
+            (option) =>
+              `<div class="combo-option" data-value="${escapeHtml(option.value)}"><span>${escapeHtml(option.label)}</span>${
+                option.sub ? `<span class="combo-sub">${escapeHtml(option.sub)}</span>` : ""
+              }</div>`
+          )
+          .join("")
+      : `<div class="combo-empty">无匹配项</div>`;
+  };
+
+  const closeList = () => {
+    list.style.display = "none";
+  };
+
+  input.addEventListener("focus", () => {
+    input.select();
+    renderList("");
+    list.style.display = "grid";
+  });
+  input.addEventListener("input", () => {
+    renderList();
+    list.style.display = "grid";
+  });
+  input.addEventListener("blur", () => {
+    setTimeout(closeList, 150);
+  });
+
+  list.addEventListener("mousedown", (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLElement>(".combo-option");
+    if (!target?.dataset.value) {
+      return;
+    }
+    event.preventDefault();
+    const option = options.find((item) => item.value === target.dataset.value);
+    if (option) {
+      input.value = option.label;
+      onPick(option.value);
+    }
+    closeList();
+    input.blur();
+  });
+}
+
+function render(root: HTMLElement, state: PopupState) {
+  const agentLabel =
+    state.agents.find((agent) => agent.agentType === state.config.agentType)?.name ||
+    (state.config.agentType ? state.config.agentType : "");
+  const agentAvailable = state.agents.some((agent) => agent.agentType === state.config.agentType);
+  const folderLabel = state.folders.find(
+    (folder) => state.config.project && folder.folderId === state.config.project.folderId
+  )?.folderName;
 
   root.innerHTML = `
+    <style>
+      .combo { position: relative; }
+      .combo input {
+        width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px;
+        box-sizing: border-box; font-size: 12px; background: white; color: #111827;
+      }
+      .combo input:disabled { background: #f1f5f9; color: #94a3b8; }
+      .combo-list {
+        position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 20;
+        max-height: 180px; overflow-y: auto; background: white; border: 1px solid #d1d5db;
+        border-radius: 8px; display: none; box-shadow: 0 8px 20px rgba(0,0,0,0.14);
+      }
+      .combo-option {
+        padding: 8px 10px; cursor: pointer; display: flex; align-items: center;
+        justify-content: space-between; gap: 8px; font-size: 12px;
+      }
+      .combo-option:hover { background: #f1f5f9; }
+      .combo-sub { color: #94a3b8; font-size: 11px; white-space: nowrap; }
+      .combo-empty { padding: 8px 10px; font-size: 12px; color: #94a3b8; }
+    </style>
     <div style="font-family: ui-sans-serif, system-ui; width: 380px; padding: 16px; box-sizing: border-box; color: #111827;">
       <h2 style="margin: 0 0 4px; font-size: 18px;">Codeg UI Bridge</h2>
       <div style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
@@ -88,17 +171,21 @@ function render(root: HTMLElement, state: PopupState) {
           <span>Token</span>
           <input id="token" type="password" value="${escapeHtml(state.config.token)}" placeholder="Codeg Web 服务 Token" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
         </label>
-        <label style="display:grid; gap:4px; font-size:12px;">
-          <span>智能体（用于修改开发）${usingFallbackAgents ? '<span style="color:#94a3b8;">· 测试连接后加载实际列表</span>' : ""}</span>
-          <select id="agent" style="padding:8px; border:1px solid #d1d5db; border-radius:8px; background:white;">${agentOptions}</select>
-        </label>
-        <label style="display:grid; gap:4px; font-size:12px;">
+        <div style="display:grid; gap:4px; font-size:12px;">
+          <span>智能体（仅显示已在 Codeg 启用的）</span>
+          <div class="combo" id="agentCombo">
+            <input id="agentInput" autocomplete="off" placeholder="测试连接后加载" />
+            <div class="combo-list" style="display:none"></div>
+          </div>
+          ${state.config.agentType && !agentAvailable ? `<div style="color:#b45309;">当前保存的智能体不在启用列表中，请重新选择</div>` : ""}
+        </div>
+        <div style="display:grid; gap:4px; font-size:12px;">
           <span>所属项目（Codeg 文件夹）</span>
-          <select id="folder" style="padding:8px; border:1px solid #d1d5db; border-radius:8px; background:white;">
-            <option value="">${state.folders.length ? "-- 选择项目 --" : "-- Codeg 中暂无项目，可手动输入路径 --"}</option>
-            ${folderOptions}
-          </select>
-        </label>
+          <div class="combo" id="folderCombo">
+            <input id="folderInput" autocomplete="off" placeholder="测试连接后加载" />
+            <div class="combo-list" style="display:none"></div>
+          </div>
+        </div>
         <label style="display:grid; gap:4px; font-size:12px;">
           <span>或手动输入项目路径</span>
           <input id="manualPath" placeholder="D:/path/to/project" style="padding:8px; border:1px solid #d1d5db; border-radius:8px;" />
@@ -122,11 +209,11 @@ async function boot() {
 
   const tab = await getCurrentTab();
   const state: PopupState = {
-    config: { host: "127.0.0.1", port: "23080", token: "", agentType: "pi", project: null },
+    config: { host: "127.0.0.1", port: "23080", token: "", agentType: "", project: null },
     agents: [],
     folders: [],
     codegVersion: "",
-    message: "填写 Codeg 地址与 Token，测试连接成功后再选择项目和智能体，最后连接页面",
+    message: "填写 Codeg 地址与 Token，测试连接成功后再选择智能体和项目，最后连接页面",
     error: "",
     busy: false,
     connected: false,
@@ -157,8 +244,13 @@ async function boot() {
       state.agents = response.agents ?? [];
       state.folders = response.folders ?? [];
       state.codegVersion = response.codegVersion || "";
-      if (!state.config.agentType && state.agents.length > 0) {
-        state.config.agentType = state.agents[0]!.agentType;
+      // Previously saved selections must still exist in the enabled list /
+      // folder list, otherwise force a fresh pick.
+      if (state.config.agentType && !state.agents.some((agent) => agent.agentType === state.config.agentType)) {
+        state.config.agentType = "";
+      }
+      if (state.config.project && !state.folders.some((folder) => folder.folderId === state.config.project?.folderId)) {
+        state.config.project = null;
       }
     } else if (response.error) {
       state.error = response.error;
@@ -168,26 +260,24 @@ async function boot() {
   type ReadFieldsResult = { ok: true; manualPath?: string } | { ok: false; error: string };
 
   /**
-   * `requireProject` is only true for 连接页面: testing the connection must
-   * work before the folder list has been loaded (the list itself comes from
-   * the tested connection), so it only validates IP/port/token.
+   * Agent and project live in state.config (picked via the comboboxes after a
+   * successful test connection); host/port/token/manualPath are read from the
+   * DOM. `requireSelection` is only true for 连接页面: testing the connection
+   * must work before the agent/folder lists have been loaded.
    */
-  function readFields(config: BridgeConfig, requireProject: boolean): ReadFieldsResult {
+  function readFields(config: BridgeConfig, requireSelection: boolean): ReadFieldsResult {
     const hostInput = root.querySelector<HTMLInputElement>("#host");
     const portInput = root.querySelector<HTMLInputElement>("#port");
     const tokenInput = root.querySelector<HTMLInputElement>("#token");
-    const agentSelect = root.querySelector<HTMLSelectElement>("#agent");
-    const folderSelect = root.querySelector<HTMLSelectElement>("#folder");
     const manualPathInput = root.querySelector<HTMLInputElement>("#manualPath");
 
-    if (!hostInput || !portInput || !tokenInput || !agentSelect || !folderSelect || !manualPathInput) {
+    if (!hostInput || !portInput || !tokenInput || !manualPathInput) {
       return { ok: false, error: "popup 渲染异常" };
     }
 
     config.host = hostInput.value.trim() || "127.0.0.1";
     config.port = portInput.value.trim() || "23080";
     config.token = tokenInput.value.trim();
-    config.agentType = agentSelect.value || "pi";
     if (!config.token) {
       return { ok: false, error: "请填写 Token" };
     }
@@ -202,19 +292,13 @@ async function boot() {
       return { ok: true, manualPath };
     }
 
-    if (folderSelect.value) {
-      const selected = state.folders.find((folder) => String(folder.folderId) === folderSelect.value);
-      if (selected) {
-        config.project = selected;
-        return { ok: true };
-      }
+    if (requireSelection && !config.agentType) {
+      return { ok: false, error: "请选择智能体" };
     }
-
     if (config.project) {
       return { ok: true };
     }
-
-    if (!requireProject) {
+    if (!requireSelection) {
       return { ok: true };
     }
 
@@ -256,6 +340,31 @@ async function boot() {
       rerender();
     };
 
+    const agentOptions: ComboOption[] = state.agents.map((agent) => ({
+      value: agent.agentType,
+      label: agent.name || agent.agentType,
+      sub: agent.installedVersion
+        ? `已安装 ${agent.installedVersion}`
+        : agent.available
+          ? "已启用"
+          : "未安装"
+    }));
+    bindCombo(root, "agentCombo", agentOptions, agentOptions.find((option) => option.value === state.config.agentType)?.label ?? "", "测试连接后加载", (value) => {
+      state.config.agentType = value;
+    });
+
+    const folderOptions: ComboOption[] = state.folders.map((folder) => ({
+      value: String(folder.folderId),
+      label: folder.folderName,
+      sub: folder.folderPath
+    }));
+    bindCombo(root, "folderCombo", folderOptions, folderOptions.find((option) => state.config.project && option.value === String(state.config.project.folderId))?.label ?? "", "测试连接后加载", (value) => {
+      const selected = state.folders.find((folder) => String(folder.folderId) === value);
+      if (selected) {
+        state.config.project = selected;
+      }
+    });
+
     if (testBtn) {
       testBtn.disabled = state.busy;
       testBtn.onclick = () => {
@@ -290,7 +399,7 @@ async function boot() {
             return;
           }
           state.codegVersion = tested.codegVersion || "";
-          state.message = `Codeg 连接成功${tested.codegVersion ? `（v${tested.codegVersion}）` : ""}`;
+          state.message = `Codeg 连接成功${tested.codegVersion ? `（v${tested.codegVersion}）` : ""}，请在下方选择智能体和项目`;
           await loadCodegInfo();
         });
       };
