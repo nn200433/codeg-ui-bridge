@@ -989,6 +989,9 @@ async function boot() {
         renderLive();
         renderBadge();
         maybeScroll();
+        // First turn of a new conversation just became readable on disk;
+        // fetch self-guards (skips when local turns already cover it).
+        void fetchHistory();
         break;
       }
       case "error": {
@@ -1038,6 +1041,8 @@ async function boot() {
     }
   }
 
+  let lastHistoryAttemptAt = 0;
+
   async function fetchHistory(): Promise<void> {
     const runtime = state.runtime;
     if (!runtime?.conversationId || !runtime.agentType) {
@@ -1046,20 +1051,30 @@ async function boot() {
     if (state.fetchedConversationId === runtime.conversationId) {
       return;
     }
-    state.fetchedConversationId = runtime.conversationId;
-    // Local turns came from the live stream of this same session; fetching
-    // would duplicate them. History loads only on panel (re)open.
+    // State pushes arrive for many unrelated reasons; keep retry quiet.
+    if (Date.now() - lastHistoryAttemptAt < 3000) {
+      return;
+    }
+    lastHistoryAttemptAt = Date.now();
     if (state.turns.length > 0) {
+      // Local turns came from the live stream of this same session; fetching
+      // would duplicate them. History loads only on panel (re)open.
+      state.fetchedConversationId = runtime.conversationId;
       return;
     }
     try {
       const client = new CodegClient(normalizeBaseUrl(state.config.host, state.config.port), state.config.token);
       const detail = await client.getConversation(runtime.agentType, runtime.conversationId);
+      state.fetchedConversationId = runtime.conversationId;
       state.turns = detail.turns.slice(-HISTORY_TURN_LIMIT).map(historyTurnToSessionTurn);
       renderTurns();
       maybeScroll(true);
     } catch (error) {
-      setMsg(`会话历史加载失败：${error instanceof Error ? error.message : String(error)}`, "error");
+      // Best-effort: a just-created conversation is not readable until its
+      // first turn is persisted (server answers "Conversation not found"
+      // during that window). Leave the id unmarked so a later panel reopen
+      // or turn completion retries quietly instead of alarming the user.
+      console.warn("[Codeg UI Bridge] 会话历史暂不可读，稍后自动重试:", error);
     }
   }
 
