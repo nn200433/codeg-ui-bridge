@@ -6,6 +6,7 @@ export const MESSAGE_TYPES = {
   popupAttachPage: "codeg/popup/attach-page",
   popupApplyCurrentSelection: "codeg/popup/apply-current-selection",
   contentGetRuntime: "codeg/content/get-runtime",
+  contentRefreshRuntime: "codeg/content/refresh-runtime",
   contentSelectionSync: "codeg/content/selection-sync",
   contentApply: "codeg/content/apply",
   contentCancelTurn: "codeg/content/cancel-turn",
@@ -18,6 +19,7 @@ export type CodegProject = {
   folderId: number;
   folderName: string;
   folderPath: string;
+  alias?: string | null;
 };
 
 export type BridgeConfig = {
@@ -131,6 +133,10 @@ export type ContentGetRuntimeRequest = {
   type: typeof MESSAGE_TYPES.contentGetRuntime;
 };
 
+export type ContentRefreshRuntimeRequest = {
+  type: typeof MESSAGE_TYPES.contentRefreshRuntime;
+};
+
 export type ContentSelectionSyncRequest = {
   type: typeof MESSAGE_TYPES.contentSelectionSync;
   pageUrl: string;
@@ -176,6 +182,7 @@ export type RuntimeRequest =
   | PopupAttachPageRequest
   | PopupApplyCurrentSelectionRequest
   | ContentGetRuntimeRequest
+  | ContentRefreshRuntimeRequest
   | ContentSelectionSyncRequest
   | ContentApplyRequest
   | ContentCancelTurnRequest

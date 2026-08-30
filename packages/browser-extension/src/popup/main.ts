@@ -53,17 +53,31 @@ const CSS_TEXT = `
 .grid2 { display: grid; grid-template-columns: 1fr 90px; gap: 8px; }
 .field { display: grid; gap: 4px; font-size: 12px; }
 .field-label { font-weight: 600; color: #334155; }
-input, select {
+input {
   width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 10px;
   font-size: 13px; font-family: inherit; background: #fff; color: #0f172a; outline: none;
 }
-input:focus, select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
-select {
-  appearance: none; -webkit-appearance: none; padding-right: 28px;
+input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+.combo-input {
+  appearance: none; padding-right: 28px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 10px center;
 }
-select:disabled { background-color: #f1f5f9; color: #94a3b8; }
+.combo-input:disabled { background-color: #f1f5f9; color: #94a3b8; }
+/* The option list stays in normal flow (not absolutely positioned) so the
+   popup window grows with it instead of clipping the bottom. */
+.combo-list {
+  display: none; margin-top: 4px; max-height: 200px; overflow-y: auto;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+.combo.open .combo-list { display: block; }
+.combo-option { padding: 7px 10px; cursor: pointer; display: grid; gap: 1px; font-size: 12px; }
+.combo-option:hover { background: #f1f5f9; }
+.combo-option.is-active { background: #eef2ff; }
+.combo-option-label { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-option-sub { color: #94a3b8; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-empty { padding: 8px 10px; font-size: 12px; color: #94a3b8; }
 .hint {
   font-size: 11px; color: #94a3b8;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -90,6 +104,127 @@ function agentLabel(agent: CodegAgentOption): string {
   return agent.installedVersion
     ? `${agent.name}（已安装 v${agent.installedVersion}）`
     : `${agent.name}（未安装）`;
+}
+
+/** Codeg convention for aliased folders: `alias [name]`. */
+function folderLabel(folder: CodegProject): string {
+  return folder.alias ? `${folder.alias} [${folder.folderName}]` : folder.folderName;
+}
+
+type ComboItem = { value: string; label: string; sub?: string; keywords: string };
+
+type ComboController = {
+  set: (items: ComboItem[], value: string, disabled: boolean, disabledPlaceholder: string) => void;
+};
+
+/**
+ * Searchable combobox. The option list expands in normal document flow so the
+ * Chrome popup window grows instead of clipping it. Typing filters by the
+ * item's pre-lowercased keywords; Enter picks the first match, Escape closes.
+ */
+function createCombo(box: HTMLElement, placeholder: string, onPick: (value: string) => void): ComboController {
+  const input = box.querySelector<HTMLInputElement>(".combo-input")!;
+  const list = box.querySelector<HTMLElement>(".combo-list")!;
+  let items: ComboItem[] = [];
+  let value = "";
+  let open = false;
+  let placeholderNow = placeholder;
+
+  const currentLabel = () => items.find((item) => item.value === value)?.label ?? "";
+
+  function render(): void {
+    list.innerHTML = "";
+    if (!open) {
+      return;
+    }
+    const filter = input.value.trim().toLowerCase();
+    const visible = filter ? items.filter((item) => item.keywords.includes(filter)) : items;
+    for (const item of visible) {
+      const option = document.createElement("div");
+      option.className = `combo-option${item.value === value ? " is-active" : ""}`;
+      const label = document.createElement("span");
+      label.className = "combo-option-label";
+      label.textContent = item.label;
+      option.append(label);
+      if (item.sub) {
+        const sub = document.createElement("span");
+        sub.className = "combo-option-sub";
+        sub.textContent = item.sub;
+        option.append(sub);
+      }
+      option.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        value = item.value;
+        input.value = item.label;
+        close();
+        onPick(item.value);
+      });
+      list.append(option);
+    }
+    if (visible.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "combo-empty";
+      empty.textContent = "无匹配项";
+      list.append(empty);
+    }
+  }
+
+  function close(): void {
+    open = false;
+    box.classList.remove("open");
+    input.value = currentLabel();
+    input.placeholder = placeholderNow;
+    render();
+  }
+
+  input.addEventListener("focus", () => {
+    if (input.disabled) {
+      return;
+    }
+    // Open as a search field: clear the current label so the full list shows.
+    open = true;
+    box.classList.add("open");
+    input.value = "";
+    input.placeholder = "输入筛选";
+    render();
+  });
+  input.addEventListener("input", () => {
+    open = true;
+    box.classList.add("open");
+    render();
+  });
+  input.addEventListener("blur", () => {
+    setTimeout(close, 120);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      close();
+      input.blur();
+      return;
+    }
+    if (event.key === "Enter") {
+      const filter = input.value.trim().toLowerCase();
+      const first = filter ? items.find((item) => item.keywords.includes(filter)) : items[0];
+      if (first) {
+        value = first.value;
+        input.value = first.label;
+        onPick(first.value);
+      }
+      close();
+      input.blur();
+    }
+  });
+
+  return {
+    set(nextItems, nextValue, disabled, disabledPlaceholder) {
+      items = nextItems;
+      value = nextValue;
+      input.disabled = disabled;
+      placeholderNow = disabled ? disabledPlaceholder : placeholder;
+      input.placeholder = placeholderNow;
+      close();
+    }
+  };
 }
 
 async function boot() {
@@ -145,16 +280,22 @@ async function boot() {
         <label class="field"><span class="field-label">端口</span><input id="port" placeholder="23080" /></label>
       </div>
       <label class="field"><span class="field-label">Token</span><input id="token" type="password" placeholder="Codeg Web 服务 Token" /></label>
-      <label class="field">
+      <div class="field">
         <span class="field-label">智能体</span>
-        <select id="agentSelect"></select>
+        <div class="combo" id="agentCombo">
+          <input class="combo-input" autocomplete="off" placeholder="测试连接后加载" />
+          <div class="combo-list"></div>
+        </div>
         <span class="hint" id="agentHint"></span>
-      </label>
-      <label class="field">
+      </div>
+      <div class="field">
         <span class="field-label">所属项目</span>
-        <select id="folderSelect"></select>
+        <div class="combo" id="folderCombo">
+          <input class="combo-input" autocomplete="off" placeholder="搜索或选择项目" />
+          <div class="combo-list"></div>
+        </div>
         <span class="hint" id="folderHint"></span>
-      </label>
+      </div>
       <div class="actions">
         <button id="testBtn" class="btn">测试连接</button>
         <button id="attachBtn" class="btn btn-primary">连接页面</button>
@@ -166,8 +307,6 @@ async function boot() {
   const hostInput = root.querySelector<HTMLInputElement>("#host")!;
   const portInput = root.querySelector<HTMLInputElement>("#port")!;
   const tokenInput = root.querySelector<HTMLInputElement>("#token")!;
-  const agentSelect = root.querySelector<HTMLSelectElement>("#agentSelect")!;
-  const folderSelect = root.querySelector<HTMLSelectElement>("#folderSelect")!;
   const testBtn = root.querySelector<HTMLButtonElement>("#testBtn")!;
   const attachBtn = root.querySelector<HTMLButtonElement>("#attachBtn")!;
   const msgEl = root.querySelector<HTMLElement>("#msg")!;
@@ -226,57 +365,46 @@ async function boot() {
     folderHint.className = "hint";
   }
 
-  function fillSelects(): void {
-    const placeholder = (text: string) => {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = text;
-      return option;
-    };
-
-    agentSelect.innerHTML = "";
-    if (state.agents.length === 0) {
-      agentSelect.disabled = true;
-      agentSelect.append(placeholder("测试连接后加载"));
-    } else {
-      agentSelect.disabled = false;
-      if (!state.agents.some((agent) => agent.agentType === state.config.agentType)) {
-        state.config.agentType = "";
-      }
-      if (!state.config.agentType) {
-        agentSelect.append(placeholder("请选择智能体"));
-      }
-      for (const agent of state.agents) {
-        const option = document.createElement("option");
-        option.value = agent.agentType;
-        option.textContent = agentLabel(agent);
-        agentSelect.append(option);
-      }
-      agentSelect.value = state.config.agentType;
+  const agentCombo = createCombo(
+    root.querySelector<HTMLElement>("#agentCombo")!,
+    "搜索或选择智能体",
+    (value) => {
+      state.config.agentType = value;
+      updateHints();
     }
-
-    folderSelect.innerHTML = "";
-    if (state.folders.length === 0) {
-      folderSelect.disabled = true;
-      folderSelect.append(placeholder("测试连接后加载"));
-    } else {
-      folderSelect.disabled = false;
-      if (state.config.project && !state.folders.some((folder) => folder.folderId === state.config.project?.folderId)) {
-        state.config.project = null;
-      }
-      if (!state.config.project) {
-        folderSelect.append(placeholder("请选择项目"));
-      }
-      for (const folder of state.folders) {
-        const option = document.createElement("option");
-        option.value = String(folder.folderId);
-        option.textContent = folder.folderName;
-        option.title = folder.folderPath;
-        folderSelect.append(option);
-      }
-      folderSelect.value = state.config.project ? String(state.config.project.folderId) : "";
+  );
+  const folderCombo = createCombo(
+    root.querySelector<HTMLElement>("#folderCombo")!,
+    "搜索或选择项目",
+    (value) => {
+      state.config.project = state.folders.find((folder) => String(folder.folderId) === value) ?? null;
+      updateHints();
     }
+  );
 
+  function refreshCombos(): void {
+    agentCombo.set(
+      state.agents.map((agent) => ({
+        value: agent.agentType,
+        label: agentLabel(agent),
+        sub: agent.description,
+        keywords: `${agent.name} ${agent.agentType} ${agent.description ?? ""}`.toLowerCase()
+      })),
+      state.config.agentType,
+      state.agents.length === 0,
+      "测试连接后加载"
+    );
+    folderCombo.set(
+      state.folders.map((folder) => ({
+        value: String(folder.folderId),
+        label: folderLabel(folder),
+        sub: folder.folderPath,
+        keywords: `${folder.alias ?? ""} ${folder.folderName} ${folder.folderPath}`.toLowerCase()
+      })),
+      state.config.project ? String(state.config.project.folderId) : "",
+      state.folders.length === 0,
+      "测试连接后加载"
+    );
     updateHints();
   }
 
@@ -291,13 +419,20 @@ async function boot() {
     state.agents = response.agents ?? [];
     state.folders = response.folders ?? [];
     state.codegVersion = response.codegVersion || "";
-    fillSelects();
+    // Saved selections must still exist in the loaded lists, else force a re-pick.
+    if (state.config.agentType && !state.agents.some((agent) => agent.agentType === state.config.agentType)) {
+      state.config.agentType = "";
+    }
+    if (state.config.project && !state.folders.some((folder) => folder.folderId === state.config.project?.folderId)) {
+      state.config.project = null;
+    }
+    refreshCombos();
     updateStatus();
   }
 
   type ReadFieldsResult = { ok: true } | { ok: false; error: string };
 
-  /** Agent/project live in state.config (select onchange); host/port/token are read from the DOM. */
+  /** Agent/project live in state.config (combo onPick); host/port/token are read from the DOM. */
   function readFields(config: BridgeConfig, requireSelection: boolean): ReadFieldsResult {
     config.host = hostInput.value.trim() || "127.0.0.1";
     config.port = portInput.value.trim() || "23080";
@@ -387,24 +522,14 @@ async function boot() {
       state.codegVersion = response.codegVersion || state.codegVersion;
       updateStatus();
       setMsg("已连接，页面上出现面板后即可选中元素发送需求", "success");
+      // Hand off to the page: close the popup, the content script's panel and
+      // selector take over (background nudges it via contentRefreshRuntime).
+      window.close();
     });
   };
 
-  agentSelect.onchange = () => {
-    state.config.agentType = agentSelect.value;
-    updateHints();
-  };
-
-  folderSelect.onchange = () => {
-    const selected = state.folders.find((folder) => String(folder.folderId) === folderSelect.value);
-    if (selected) {
-      state.config.project = selected;
-    }
-    updateHints();
-  };
-
   updateStatus();
-  fillSelects();
+  refreshCombos();
   setMsg(
     state.connected
       ? "页面绑定已连接，可在页面上直接发送需求"

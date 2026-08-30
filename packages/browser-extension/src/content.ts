@@ -2285,6 +2285,11 @@ async function boot() {
   window.addEventListener("scroll", handleWindowScroll, true);
 
   chrome.runtime.onMessage.addListener((message: unknown) => {
+    const generic = message as { type?: string } | undefined;
+    if (generic?.type === MESSAGE_TYPES.contentRefreshRuntime) {
+      void loadRuntime();
+      return false;
+    }
     const agentMessage = message as ContentAgentEventMessage | undefined;
     if (agentMessage && agentMessage.type === MESSAGE_TYPES.contentAgentEvent && agentMessage.event) {
       applyAgentEventToState(state, agentMessage.event);

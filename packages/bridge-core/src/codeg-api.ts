@@ -18,6 +18,7 @@ export type CodegFolderInfo = {
   id: number;
   name: string;
   path: string;
+  alias?: string | null;
   gitBranch?: string | null;
   defaultAgentType?: string | null;
   kind?: string;

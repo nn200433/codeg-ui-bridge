@@ -694,6 +694,9 @@ async function handleAttachPage(
     await chrome.storage.local.set({ [TAB_ID_KEY]: tabId, [PAGE_URL_KEY]: pageUrl });
     await saveOriginPref(pageUrl, config);
     await ensureContentScript(tabId);
+    // An already-injected content script only learns about the new connection
+    // when told; a fresh injection reloads the runtime by itself at boot.
+    void chrome.tabs.sendMessage(tabId, { type: MESSAGE_TYPES.contentRefreshRuntime }).catch(() => {});
 
     return {
       ok: true,
@@ -736,7 +739,12 @@ async function handleLoadCodegInfo(): Promise<RuntimeResponse> {
     ]);
     const projects: CodegProject[] = folders
       .filter((folder) => folder.kind !== "chat")
-      .map((folder) => ({ folderId: folder.id, folderName: folder.name, folderPath: folder.path }));
+      .map((folder) => ({
+        folderId: folder.id,
+        folderName: folder.name,
+        folderPath: folder.path,
+        alias: typeof folder.alias === "string" ? folder.alias : null
+      }));
     // Only agents the user explicitly enabled in Codeg are offered; the full
     // registry (including disabled entries) is never surfaced here.
     const agentList = agents
