@@ -59,16 +59,24 @@ body {
   background: #f8fafc; color: #0f172a;
 }
 #app { height: 100%; display: flex; flex-direction: column; }
-.wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px; gap: 10px; }
-.head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px; gap: 8px; }
+.statusbar { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-width: 0; }
 .logo {
-  width: 32px; height: 32px; border-radius: 9px; flex: 0 0 auto;
+  width: 28px; height: 28px; border-radius: 8px; flex: 0 0 auto;
   background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
-  font-size: 16px; font-weight: 700;
+  font-size: 14px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
 }
-.head-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
-.head-sub { font-size: 11px; color: #64748b; }
+.status-title { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.status-ver { font-size: 11px; color: #64748b; font-weight: 500; }
+.status-page {
+  flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.context { display: flex; gap: 8px; flex: 0 0 auto; }
+.context .field { flex: 1; min-width: 0; }
+.tabbar { flex: 0 0 auto; }
+.tabbar select { flex: 1; min-width: 0; }
 .card {
   background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
   padding: 10px 12px; display: grid; gap: 7px; flex: 0 0 auto;
@@ -78,8 +86,6 @@ body {
 .dot-ok { background: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
 .dot-off { background: #cbd5e1; }
 .row-key { color: #64748b; flex: 0 0 auto; }
-.row-val { margin-left: auto; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-val--page { font-weight: 400; color: #475569; display: inline-flex; align-items: center; gap: 6px; }
 .row-favicon { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; }
 .grid2 { display: grid; grid-template-columns: 1fr 90px; gap: 8px; }
 .field { display: grid; gap: 4px; font-size: 12px; }
@@ -90,6 +96,7 @@ input, select {
   min-width: 0;
 }
 input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+.combo { position: relative; }
 .combo-input {
   appearance: none; padding-right: 28px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
@@ -97,7 +104,8 @@ input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.
 }
 .combo-input:disabled { background-color: #f1f5f9; color: #94a3b8; }
 .combo-list {
-  display: none; margin-top: 4px; max-height: 180px; overflow-y: auto;
+  display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin-top: 4px;
+  max-height: 180px; overflow-y: auto;
   background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
 }
@@ -119,6 +127,9 @@ input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.
 .btn:hover { background: #f1f5f9; }
 .btn-primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
 .btn-primary:hover { background: #4338ca; }
+.btn-send { min-height: 38px; }
+.btn-stop { background: #dc2626; border-color: #dc2626; color: #fff; }
+.btn-stop:hover { background: #b91c1c; }
 .btn-danger { color: #b91c1c; border-color: #fecaca; }
 .btn-danger:hover { background: #fef2f2; }
 .btn:disabled { opacity: 0.55; cursor: default; }
@@ -126,14 +137,15 @@ input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.
 .msg { font-size: 12px; color: #475569; min-height: 17px; line-height: 1.5; flex: 0 0 auto; }
 .msg-error { color: #dc2626; }
 .msg-success { color: #059669; }
-.select-toggle {
-  width: 100%; min-height: 36px; border-radius: 10px; border: 1px solid #cbd5e1;
-  background: #fff; color: #334155; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer;
+.chip {
+  padding: 5px 12px; border-radius: 999px; border: 1px solid #cbd5e1;
+  background: #fff; color: #334155; font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
   flex: 0 0 auto;
 }
-.select-toggle.is-active { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
-.pick-card { display: grid; gap: 5px; }
-.pick-card--empty { font-size: 12px; color: #64748b; text-align: center; padding: 8px 0; }
+.chip:disabled { opacity: 0.5; cursor: default; }
+.chip.is-active { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
+.pick-bar { display: flex; align-items: flex-start; gap: 6px; flex: 0 0 auto; }
+.pick-info { flex: 1; min-width: 0; display: grid; gap: 5px; font-size: 12px; }
 .pick-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
 .pick-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .pick-file {
@@ -168,7 +180,6 @@ textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241,
 .attach-row { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #475569; }
 .attach-row label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .attach-row input { width: auto; accent-color: #4f46e5; margin: 0; }
-.composer-actions { display: flex; gap: 8px; }
 .session { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .session-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; flex: 0 0 auto; }
 .session-title { font-size: 12px; font-weight: 700; color: #334155; }
@@ -529,65 +540,52 @@ async function boot() {
   root.innerHTML = `
     <style>${CSS_TEXT}</style>
     <div class="wrap">
-      <header class="head">
+      <header class="statusbar">
         <div class="logo">C</div>
-        <div>
-          <div class="head-title">Codeg Bridge</div>
-          <div class="head-sub" id="codegVer">未连接 Codeg</div>
-        </div>
+        <span class="dot dot-off" id="connDot"></span>
+        <span class="status-title">Codeg <span class="status-ver" id="codegVer"></span></span>
+        <span class="status-page" id="statusPage">未绑定页面</span>
+        <button id="settingsBtn" class="icon-btn" title="连接设置">⚙</button>
       </header>
-      <section class="card">
-        <div class="row" id="rowConn"><span class="dot dot-off"></span><span class="row-key">Codeg 服务</span><span class="row-val">未连接</span></div>
-        <div class="row" id="rowBind"><span class="row-key">绑定页面</span><span class="row-val row-val--page" id="rowBindVal">未绑定</span><button id="disconnectBtn" class="btn btn-danger" style="flex:0 0 auto;padding:4px 10px;font-size:11px;display:none;">断开</button></div>
-        <div class="row"><span class="row-key">目标标签页</span><span id="tabSelectWrap" style="flex:1;min-width:0;display:flex;gap:6px;"><select id="tabSelect"></select><button id="refreshTabs" class="btn btn-icon" title="刷新标签页列表">↻</button></span></div>
-      </section>
-      <section class="card" id="configCard">
+      <section class="card" id="settingsCard" style="display:none">
         <div class="grid2">
           <label class="field"><span class="field-label">Codeg IP</span><input id="host" placeholder="127.0.0.1" /></label>
           <label class="field"><span class="field-label">端口</span><input id="port" placeholder="23080" /></label>
         </div>
         <label class="field"><span class="field-label">Token</span><input id="token" type="password" placeholder="Codeg Web 服务 Token" /></label>
-        <div class="field">
-          <span class="field-label">智能体</span>
-          <div class="combo" id="agentCombo">
-            <input class="combo-input" autocomplete="off" placeholder="测试连接后加载" />
-            <div class="combo-list"></div>
-          </div>
-          <span class="hint" id="agentHint"></span>
+        <div class="actions">
+          <button id="saveConnectBtn" class="btn btn-primary">保存并连接</button>
+          <button id="disconnectBtn" class="btn btn-danger" style="display:none;">断开页面</button>
         </div>
-        <div class="field">
-          <span class="field-label">所属项目</span>
+      </section>
+      <div class="row tabbar">
+        <span class="row-key">目标标签页</span>
+        <select id="tabSelect"></select>
+        <button id="refreshTabs" class="btn btn-icon" title="刷新标签页列表">↻</button>
+      </div>
+      <section class="context">
+        <label class="field">
+          <span class="field-label">项目</span>
           <div class="combo" id="folderCombo">
-            <input class="combo-input" autocomplete="off" placeholder="搜索或选择项目" />
+            <input class="combo-input" autocomplete="off" placeholder="自动匹配页面项目" />
             <div class="combo-list"></div>
           </div>
           <span class="hint" id="folderHint"></span>
-        </div>
-        <div class="actions">
-          <button id="testBtn" class="btn">测试连接</button>
-          <button id="attachBtn" class="btn btn-primary">连接页面</button>
-        </div>
+        </label>
+        <label class="field">
+          <span class="field-label">智能体</span>
+          <div class="combo" id="agentCombo">
+            <input class="combo-input" autocomplete="off" placeholder="选择智能体" />
+            <div class="combo-list"></div>
+          </div>
+          <span class="hint" id="agentHint"></span>
+        </label>
       </section>
-      <button id="selectToggle" class="select-toggle">⬚ 选择元素</button>
-      <section class="card pick-card" id="pickCard"></section>
-      <section class="composer">
-        <textarea id="prompt" placeholder="描述你要的改动，或这里的问题…"></textarea>
-        <div class="presets" id="presets"></div>
-        <div class="attach-row">
-          <label><input type="checkbox" id="attachStyle" checked />附带元素样式</label>
-          <label><input type="checkbox" id="attachErrors" checked />附带控制台报错</label>
-        </div>
-        <div class="composer-actions">
-          <button id="sendBtn" class="btn btn-primary">发送 ▶</button>
-        </div>
-      </section>
-      <div class="msg" id="msg"></div>
       <section class="session">
         <div class="session-head">
           <span class="session-title">会话</span>
           <span class="badge" id="turnBadge">空闲</span>
           <span class="session-spacer"></span>
-          <button id="stopBtn" class="btn" style="flex:0 0 auto;padding:3px 12px;font-size:11px;display:none;">停止</button>
         </div>
         <div class="session-body" id="sessionBody">
           <div class="pending" id="pendingArea"></div>
@@ -596,20 +594,34 @@ async function boot() {
         </div>
         <button class="back-bottom" id="backBottom">↓ 回到底部</button>
       </section>
+      <div class="msg" id="msg"></div>
+      <section class="composer">
+        <div class="pick-bar">
+          <button id="selectToggle" class="chip">⬚ 选择元素</button>
+          <div class="pick-info" id="pickInfo"></div>
+        </div>
+        <textarea id="prompt" placeholder="描述你要的改动，或这里的问题…"></textarea>
+        <div class="presets" id="presets"></div>
+        <div class="attach-row">
+          <label><input type="checkbox" id="attachStyle" checked />附带元素样式</label>
+          <label><input type="checkbox" id="attachErrors" checked />附带控制台报错</label>
+        </div>
+        <button id="sendBtn" class="btn btn-primary btn-send">发送 ▶</button>
+      </section>
     </div>
   `;
 
   const hostInput = root.querySelector<HTMLInputElement>("#host")!;
   const portInput = root.querySelector<HTMLInputElement>("#port")!;
   const tokenInput = root.querySelector<HTMLInputElement>("#token")!;
-  const testBtn = root.querySelector<HTMLButtonElement>("#testBtn")!;
-  const attachBtn = root.querySelector<HTMLButtonElement>("#attachBtn")!;
+  const settingsCard = root.querySelector<HTMLElement>("#settingsCard")!;
+  const settingsBtn = root.querySelector<HTMLButtonElement>("#settingsBtn")!;
+  const saveConnectBtn = root.querySelector<HTMLButtonElement>("#saveConnectBtn")!;
   const disconnectBtn = root.querySelector<HTMLButtonElement>("#disconnectBtn")!;
   const selectToggle = root.querySelector<HTMLButtonElement>("#selectToggle")!;
-  const pickCard = root.querySelector<HTMLElement>("#pickCard")!;
+  const pickInfo = root.querySelector<HTMLElement>("#pickInfo")!;
   const promptInput = root.querySelector<HTMLTextAreaElement>("#prompt")!;
   const sendBtn = root.querySelector<HTMLButtonElement>("#sendBtn")!;
-  const stopBtn = root.querySelector<HTMLButtonElement>("#stopBtn")!;
   const turnBadge = root.querySelector<HTMLElement>("#turnBadge")!;
   const pendingArea = root.querySelector<HTMLElement>("#pendingArea")!;
   const turnsArea = root.querySelector<HTMLElement>("#turnsArea")!;
@@ -624,6 +636,14 @@ async function boot() {
     msgEl.className = `msg${kind === "error" ? " msg-error" : kind === "success" ? " msg-success" : ""}`;
   }
 
+  function persistConfig(): void {
+    void sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupSaveConfig, config: state.config }).catch(() => undefined);
+  }
+
+  function setSettingsOpen(open: boolean): void {
+    settingsCard.style.display = open ? "" : "none";
+  }
+
   function maybeScroll(force = false): void {
     if (force || state.stickToBottom) {
       sessionBody.scrollTop = sessionBody.scrollHeight;
@@ -631,26 +651,22 @@ async function boot() {
   }
 
   function renderStatus(): void {
-    root.querySelector<HTMLElement>("#codegVer")!.textContent = state.codegVersion ? `Codeg v${state.codegVersion}` : "未连接 Codeg";
-    const connRow = root.querySelector<HTMLElement>("#rowConn")!;
-    connRow.querySelector<HTMLElement>(".dot")!.className = `dot ${state.connected ? "dot-ok" : "dot-off"}`;
-    connRow.querySelector<HTMLElement>(".row-val")!.textContent = state.connected
-      ? `已连接 ${state.runtime?.connectionId ?? ""}`
-      : "未连接";
-    const bindVal = root.querySelector<HTMLElement>("#rowBindVal")!;
+    root.querySelector<HTMLElement>("#codegVer")!.textContent = state.codegVersion ? `v${state.codegVersion}` : "";
+    root.querySelector<HTMLElement>("#connDot")!.className = `dot ${state.connected ? "dot-ok" : "dot-off"}`;
+    const pageEl = root.querySelector<HTMLElement>("#statusPage")!;
     if (state.attachedTabId != null) {
-      bindVal.innerHTML = "";
+      pageEl.innerHTML = "";
       if (state.attachedFavIconUrl) {
         const icon = document.createElement("img");
         icon.className = "row-favicon";
         icon.src = state.attachedFavIconUrl;
-        bindVal.appendChild(icon);
+        pageEl.appendChild(icon);
       }
-      bindVal.appendChild(document.createTextNode(state.attachedTitle || state.attachedPageUrl || "已绑定"));
-      bindVal.title = state.attachedPageUrl;
+      pageEl.appendChild(document.createTextNode(state.attachedTitle || state.attachedPageUrl || "已绑定页面"));
+      pageEl.title = state.attachedPageUrl;
     } else {
-      bindVal.textContent = "未绑定";
-      bindVal.title = "";
+      pageEl.textContent = "未绑定页面";
+      pageEl.title = "";
     }
     disconnectBtn.style.display = state.attachedTabId != null ? "" : "none";
   }
@@ -673,12 +689,14 @@ async function boot() {
     folderHint.textContent = folder?.folderPath ?? "";
   }
 
-  const agentCombo = createCombo(root.querySelector<HTMLElement>("#agentCombo")!, "搜索或选择智能体", (value) => {
+  const agentCombo = createCombo(root.querySelector<HTMLElement>("#agentCombo")!, "选择智能体", (value) => {
     state.config.agentType = value;
+    persistConfig();
     updateHints();
   });
-  const folderCombo = createCombo(root.querySelector<HTMLElement>("#folderCombo")!, "搜索或选择项目", (value) => {
+  const folderCombo = createCombo(root.querySelector<HTMLElement>("#folderCombo")!, "自动匹配页面项目", (value) => {
     state.config.project = state.folders.find((folder) => String(folder.folderId) === value) ?? null;
+    persistConfig();
     updateHints();
   });
 
@@ -692,7 +710,7 @@ async function boot() {
       })),
       state.config.agentType,
       state.agents.length === 0,
-      "测试连接后加载"
+      "连接后加载"
     );
     folderCombo.set(
       state.folders.map((folder) => ({
@@ -703,26 +721,30 @@ async function boot() {
       })),
       state.config.project ? String(state.config.project.folderId) : "",
       state.folders.length === 0,
-      "测试连接后加载"
+      "连接后加载"
     );
     updateHints();
   }
 
   function renderSelectToggle(): void {
-    selectToggle.classList.toggle("is-active", state.selecting);
-    selectToggle.textContent = state.selecting ? "⬚ 选择中：点击页面元素" : "⬚ 选择元素";
+    const attached = state.attachedTabId != null;
+    const active = state.selecting && attached;
+    selectToggle.disabled = !attached;
+    selectToggle.classList.toggle("is-active", active);
+    selectToggle.textContent = active ? "⬚ 选择中" : "⬚ 选择元素";
+    selectToggle.title = attached ? "开启后点击页面元素作为上下文" : "连接页面后可用";
   }
 
-  function renderPickCard(): void {
+  function renderPickInfo(): void {
     if (!state.selection) {
-      pickCard.innerHTML = `<div class="pick-card--empty">开启「选择元素」后点击页面任意元素，AI 将以它为上下文</div>`;
+      pickInfo.innerHTML = "";
       return;
     }
     const hint = state.sourceHint;
     const sourceText = hint?.file || hint?.sourceId
       ? `${hint.file || hint.sourceId}${hint.line ? `:${hint.line}` : ""}`
       : "";
-    pickCard.innerHTML = `
+    pickInfo.innerHTML = `
       <div class="pick-row">
         <span class="pick-label">🎯 ${escapeHtml(state.selection.selector || state.selection.tag)}</span>
         <button class="icon-btn" id="clearPickBtn" title="取消选中">×</button>
@@ -740,10 +762,10 @@ async function boot() {
         <div class="pick-detail-row"><span>sourceId</span><code>${escapeHtml(state.sourceHint?.sourceId || "-")}</code></div>
       </details>
     `;
-    pickCard.querySelector<HTMLButtonElement>("#clearPickBtn")?.addEventListener("click", () => {
+    pickInfo.querySelector<HTMLButtonElement>("#clearPickBtn")?.addEventListener("click", () => {
       void clearPick();
     });
-    pickCard.querySelector<HTMLButtonElement>("#copyLocateBtn")?.addEventListener("click", () => {
+    pickInfo.querySelector<HTMLButtonElement>("#copyLocateBtn")?.addEventListener("click", () => {
       if (!state.sourceHint) {
         return;
       }
@@ -763,7 +785,7 @@ async function boot() {
     state.selection = null;
     state.sourceHint = undefined;
     await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.contentSetSelecting, selecting: true }).catch(() => undefined);
-    renderPickCard();
+    renderPickInfo();
   }
 
   function renderBadge(): void {
@@ -776,7 +798,11 @@ async function boot() {
     const badge = map[state.turnState];
     turnBadge.className = `badge ${badge.cls}`;
     turnBadge.textContent = badge.label;
-    stopBtn.style.display = state.turnState === "running" ? "" : "none";
+    // One button for both directions: send when idle, stop while running.
+    const running = state.turnState === "running";
+    sendBtn.textContent = running ? "停止 ■" : "发送 ▶";
+    sendBtn.classList.toggle("btn-stop", running);
+    sendBtn.disabled = false;
   }
 
   function renderPending(): void {
@@ -851,7 +877,11 @@ async function boot() {
 
   function renderTurns(): void {
     if (state.turns.length === 0) {
-      turnsArea.innerHTML = `<div class="session-empty">暂无会话历史，发送第一条需求后开始记录</div>`;
+      turnsArea.innerHTML = `<div class="session-empty">${
+        state.config.token
+          ? "在页面上点选元素，描述你的改动，对话将在这里开始"
+          : "填写连接信息后即可开始"
+      }</div>`;
       return;
     }
     const parts = state.turns.map((turn) => {
@@ -1142,13 +1172,61 @@ async function boot() {
     }
   }
 
-  testBtn.addEventListener("click", () => {
+  /** Binding a page = picking its tab here; the panel-open auto-attach covers reopens. */
+  async function attachSelectedTab(): Promise<void> {
+    const tabId = Number(tabSelect.value);
+    if (!Number.isFinite(tabId) || tabId <= 0) {
+      setMsg("没有可选标签页，请先打开目标网页", "error");
+      return;
+    }
+    const fields = readFields(false);
+    if (!fields.ok) {
+      setMsg(fields.error, "error");
+      setSettingsOpen(true);
+      return;
+    }
+    await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupSaveConfig, config: state.config });
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) {
+      setMsg("标签页已关闭，请刷新列表重选", "error");
+      return;
+    }
+    setMsg("正在连接目标页面...");
+    const response = await sendMessage<RuntimeResponse>({
+      type: MESSAGE_TYPES.popupAttachPage,
+      tabId,
+      pageUrl: tab.url ?? "",
+      pageTitle: tab.title
+    });
+    if (!response.ok) {
+      setMsg(response.error || "连接失败", "error");
+      return;
+    }
+    state.codegVersion = response.codegVersion || state.codegVersion;
+    state.runtime = response.runtime ?? state.runtime;
+    renderStatus();
+    await refreshTabList();
+    setMsg("页面已连接，点击页面元素即可选中", "success");
+    await fetchHistory();
+  }
+
+  tabSelect.addEventListener("change", () => {
+    void attachSelectedTab().catch((error) => {
+      setMsg(error instanceof Error ? error.message : String(error), "error");
+    });
+  });
+
+  settingsBtn.addEventListener("click", () => {
+    setSettingsOpen(settingsCard.style.display === "none");
+  });
+
+  saveConnectBtn.addEventListener("click", () => {
     const fields = readFields(false);
     if (!fields.ok) {
       setMsg(fields.error, "error");
       return;
     }
-    testBtn.disabled = true;
+    saveConnectBtn.disabled = true;
     setMsg("正在连接 Codeg...");
     void (async () => {
       try {
@@ -1157,68 +1235,14 @@ async function boot() {
           setMsg(saved.error || "保存失败", "error");
           return;
         }
-        const tested = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupTestConnection });
-        if (!tested.ok) {
-          setMsg(tested.error || "连接失败", "error");
-          return;
-        }
-        state.codegVersion = tested.codegVersion || "";
         await loadCodegInfo();
-        setMsg(`Codeg 连接成功${state.codegVersion ? `（v${state.codegVersion}）` : ""}，请选择智能体和项目后连接页面`, "success");
+        setSettingsOpen(false);
+        await attachSelectedTab();
       } finally {
-        testBtn.disabled = false;
+        saveConnectBtn.disabled = false;
       }
     })().catch((error) => {
-      testBtn.disabled = false;
-      setMsg(error instanceof Error ? error.message : String(error), "error");
-    });
-  });
-
-  attachBtn.addEventListener("click", () => {
-    const fields = readFields(true);
-    if (!fields.ok) {
-      setMsg(fields.error, "error");
-      return;
-    }
-    const tabId = Number(tabSelect.value);
-    if (!Number.isFinite(tabId) || tabId <= 0) {
-      setMsg("请先选择目标标签页", "error");
-      return;
-    }
-    attachBtn.disabled = true;
-    setMsg("正在保存并连接目标页面...");
-    void (async () => {
-      try {
-        const saved = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.popupSaveConfig, config: state.config });
-        if (!saved.ok) {
-          setMsg(saved.error || "保存失败", "error");
-          return;
-        }
-        const tab = await chrome.tabs.get(tabId);
-        const response = await sendMessage<RuntimeResponse>({
-          type: MESSAGE_TYPES.popupAttachPage,
-          tabId,
-          pageUrl: tab.url ?? "",
-          pageTitle: tab.title
-        });
-        if (!response.ok) {
-          setMsg(response.error || "连接失败", "error");
-          return;
-        }
-        state.codegVersion = response.codegVersion || state.codegVersion;
-        state.runtime = response.runtime ?? state.runtime;
-        state.attachedTabId = tabId;
-        state.attachedPageUrl = tab.url ?? "";
-        state.attachedTitle = tab.title ?? "";
-        renderStatus();
-        await refreshTabList();
-        setMsg("已连接，开启「选择元素」后点击页面即可选中", "success");
-        await fetchHistory();
-      } finally {
-        attachBtn.disabled = false;
-      }
-    })().catch((error) => {
-      attachBtn.disabled = false;
+      saveConnectBtn.disabled = false;
       setMsg(error instanceof Error ? error.message : String(error), "error");
     });
   });
@@ -1250,6 +1274,10 @@ async function boot() {
   });
 
   selectToggle.addEventListener("click", () => {
+    if (state.attachedTabId == null) {
+      setMsg("请先连接页面：打开目标网页后会自动绑定", "error");
+      return;
+    }
     state.selecting = !state.selecting;
     renderSelectToggle();
     void sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.contentSetSelecting, selecting: state.selecting })
@@ -1286,6 +1314,10 @@ async function boot() {
   });
 
   sendBtn.addEventListener("click", () => {
+    if (state.turnState === "running") {
+      cancelTurn();
+      return;
+    }
     sendPromptSafe();
   });
   promptInput.addEventListener("keydown", (event) => {
@@ -1302,7 +1334,7 @@ async function boot() {
       return;
     }
     if (state.attachedTabId == null) {
-      setMsg("请先连接页面", "error");
+      setMsg("未连接页面：请在上方「目标标签页」中选择要连接的页面", "error");
       return;
     }
     let context: ContentApplyContext;
@@ -1316,7 +1348,7 @@ async function boot() {
     }
     const selection = context.selection?.tag ? context.selection : state.selection;
     if (!selection?.tag) {
-      setMsg("请先开启「选择元素」并点击页面元素", "error");
+      setMsg("请先在页面上点选一个元素作为上下文", "error");
       return;
     }
     const extra: ApplyExtra = {};
@@ -1356,7 +1388,7 @@ async function boot() {
     });
   }
 
-  stopBtn.addEventListener("click", () => {
+  function cancelTurn(): void {
     void (async () => {
       const response = await sendMessage<RuntimeResponse>({ type: MESSAGE_TYPES.contentCancelTurn });
       if (!response.ok) {
@@ -1365,7 +1397,7 @@ async function boot() {
       }
       setMsg("已请求停止当前任务", "success");
     })();
-  });
+  }
 
   pendingArea.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button");
@@ -1456,7 +1488,7 @@ async function boot() {
       } else if (message.kind === "selection") {
         state.selection = message.selection;
         state.sourceHint = message.sourceHint;
-        renderPickCard();
+        renderPickInfo();
       }
     });
     port.onDisconnect.addListener(() => {
@@ -1490,15 +1522,12 @@ async function boot() {
 
   renderStatus();
   renderSelectToggle();
-  renderPickCard();
+  renderPickInfo();
   renderBadge();
   renderTurns();
   refreshCombos();
-  setMsg(
-    state.attachedTabId != null
-      ? "页面绑定已连接，开启「选择元素」后点击页面即可选中"
-      : "填写 Codeg 地址与 Token，测试连接后选择智能体和项目，再连接页面"
-  );
+  setMsg(state.attachedTabId != null ? "页面已连接，点击页面元素即可选中" : "");
+  setSettingsOpen(!state.config.token);
   if (state.config.host && state.config.port && state.config.token) {
     await loadCodegInfo();
   }

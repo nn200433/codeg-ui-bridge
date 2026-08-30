@@ -170,6 +170,9 @@ chrome.runtime.onConnect.addListener((port) => {
   }
   panelPorts.add(port);
   void sendStateToPort(port);
+  // Panel opened: silently re-attach the remembered tab so the user never
+  // presses "connect" again. Best-effort; failures leave state untouched.
+  void autoAttachStoredTab().catch(() => undefined);
   // A fresh panel port after a service worker restart means the socket and
   // its subscription are gone; re-arm so live events keep flowing.
   void (async () => {
@@ -807,6 +810,23 @@ async function ensureContentScript(tabId: number): Promise<void> {
     target: { tabId },
     files: ["content.js"]
   });
+}
+
+/** Config saved once is enough: re-bind the remembered tab when the panel opens. */
+async function autoAttachStoredTab(): Promise<void> {
+  const tabId = await getAttachedTabId();
+  if (tabId == null) {
+    return;
+  }
+  const config = await getConfig();
+  if (!hasEndpoint(config) || !config.project?.folderPath) {
+    return;
+  }
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.url || !/^(https?|file):/.test(tab.url)) {
+    return;
+  }
+  await handleAttachPage(tabId, tab.url, tab.title);
 }
 
 async function handleLoadCodegInfo(): Promise<RuntimeResponse> {
