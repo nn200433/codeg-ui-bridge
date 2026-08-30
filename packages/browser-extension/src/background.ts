@@ -10,7 +10,7 @@ import type {
   CodegEventEnvelope,
   CodegSessionSnapshot
 } from "@codeg-ui-bridge/bridge-core";
-import { MESSAGE_TYPES } from "./messages";
+import { MESSAGE_TYPES, SIDE_PANEL_PORT_NAME } from "./messages";
 import type {
   AgentStreamEvent,
   BridgeConfig,
@@ -18,6 +18,7 @@ import type {
   CodegProject,
   ContentSelection,
   ContentSourceHint,
+  PanelPortEvent,
   RuntimeRequest,
   RuntimeResponse
 } from "./messages";
@@ -27,7 +28,7 @@ const CONNECTION_KEY = "codegui.bridge.connection";
 const TAB_ID_KEY = "codegui.bridge.attached-tab-id";
 const PAGE_URL_KEY = "codegui.bridge.attached-page-url";
 const ORIGIN_PREFS_KEY = "codegui.bridge.origin-prefs";
-const LAST_SELECTION_KEY = "codegui.bridge.last-selection";
+const SELECTING_KEY = "codegui.bridge.selecting";
 
 const WS_PING_INTERVAL_MS = 20_000;
 const WS_RECONNECT_MAX_MS = 30_000;
@@ -117,6 +118,9 @@ async function patchConnection(patch: Partial<ConnectionRecord>): Promise<void> 
     return;
   }
   await saveConnection({ ...record, ...patch });
+  // conversationId / externalSessionId changes matter to the side panel
+  // (history fetch keys off conversationId), so piggyback a state push here.
+  await broadcastState();
 }
 
 async function getAttachedTabId(): Promise<number | null> {
@@ -155,16 +159,89 @@ async function saveOriginPref(pageUrl: string, config: BridgeConfig): Promise<vo
   await chrome.storage.local.set({ [ORIGIN_PREFS_KEY]: prefs });
 }
 
-async function forwardToAttachedTab(event: AgentStreamEvent): Promise<void> {
-  const tabId = await getAttachedTabId();
-  if (tabId == null) {
+// Side Panel wiring: the panel page holds a long-lived port; every agent
+// stream event and state change is pushed to all connected ports. The page
+// content script no longer receives any of this.
+const panelPorts = new Set<chrome.runtime.Port>();
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== SIDE_PANEL_PORT_NAME) {
     return;
   }
-  try {
-    await chrome.tabs.sendMessage(tabId, { type: MESSAGE_TYPES.contentAgentEvent, event });
-  } catch {
-    // The attached tab may be gone or has no content script; ignore delivery failures.
+  panelPorts.add(port);
+  void sendStateToPort(port);
+  // A fresh panel port after a service worker restart means the socket and
+  // its subscription are gone; re-arm so live events keep flowing.
+  void (async () => {
+    const record = await getConnection();
+    if (record) {
+      attachConnectionStream(record.connectionId);
+    }
+  })();
+  port.onDisconnect.addListener(() => {
+    panelPorts.delete(port);
+  });
+});
+
+chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error) => console.error("[Codeg UI Bridge] setPanelBehavior failed:", error));
+
+async function broadcastToPanels(event: PanelPortEvent): Promise<void> {
+  for (const port of panelPorts) {
+    try {
+      port.postMessage(event);
+    } catch {
+      panelPorts.delete(port);
+    }
   }
+}
+
+async function buildStateEvent(): Promise<PanelPortEvent> {
+  const config = await getConfig();
+  const record = await getConnection();
+  const tabId = await getAttachedTabId();
+  const pageUrl = await getAttachedPageUrl();
+  const stored = await chrome.storage.local.get(SELECTING_KEY);
+  let attachedTitle: string | undefined;
+  let attachedFavIconUrl: string | undefined;
+  if (tabId != null) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      attachedTitle = tab.title;
+      attachedFavIconUrl = tab.favIconUrl;
+    } catch {
+      // Tab may be gone; metadata stays undefined.
+    }
+  }
+  return {
+    kind: "state",
+    connected: Boolean(record && hasEndpoint(config)),
+    // Selection mode defaults to on: first use should behave like the old
+    // in-page panel which started in picking mode.
+    selecting: stored[SELECTING_KEY] !== false,
+    attachedTabId: tabId ?? undefined,
+    attachedPageUrl: pageUrl || undefined,
+    attachedTitle,
+    attachedFavIconUrl,
+    runtime: record && hasEndpoint(config) ? toRuntime(config, record) : undefined
+  };
+}
+
+async function sendStateToPort(port: chrome.runtime.Port): Promise<void> {
+  try {
+    port.postMessage(await buildStateEvent());
+  } catch {
+    panelPorts.delete(port);
+  }
+}
+
+async function broadcastState(): Promise<void> {
+  await broadcastToPanels(await buildStateEvent());
+}
+
+async function forwardToPanels(event: AgentStreamEvent): Promise<void> {
+  await broadcastToPanels({ kind: "event", event });
 }
 
 function isDeadConnectionStatus(status: string): boolean {
@@ -194,7 +271,7 @@ async function ensureConnection(config: BridgeConfig): Promise<ConnectionRecord>
   const workingDir = config.project?.folderPath || "";
   const agentType = config.agentType;
   if (!agentType) {
-    throw new Error("请先在 popup 中选择智能体");
+    throw new Error("请先在侧边栏中选择智能体");
   }
 
   const attemptConnect = async (sessionId?: string): Promise<string> =>
@@ -413,12 +490,12 @@ async function handleSocketFrame(raw: unknown): Promise<void> {
     if (typeof snapshot?.conversation_id === "number") {
       await patchConnection({ conversationId: snapshot.conversation_id });
     }
-    await forwardToAttachedTab({ kind: "status", status: String(snapshot?.status ?? "ready") });
+    await forwardToPanels({ kind: "status", status: String(snapshot?.status ?? "ready") });
     const pendingPermission = snapshot?.pending_permission as
       | { request_id?: string; tool_call?: { title?: string }; options?: { option_id?: string; name?: string }[] }
       | undefined;
     if (pendingPermission?.request_id) {
-      await forwardToAttachedTab({
+      await forwardToPanels({
         kind: "permission",
         requestId: pendingPermission.request_id,
         title: pendingPermission.tool_call?.title,
@@ -432,7 +509,7 @@ async function handleSocketFrame(raw: unknown): Promise<void> {
       | { question_id?: string; questions?: CodegEventEnvelope[] }
       | undefined;
     if (pendingQuestion?.question_id) {
-      await forwardToAttachedTab({
+      await forwardToPanels({
         kind: "question",
         questionId: pendingQuestion.question_id,
         questions: normalizeQuestionSpecs(pendingQuestion.questions ?? [])
@@ -442,7 +519,7 @@ async function handleSocketFrame(raw: unknown): Promise<void> {
       | { approval_id?: string; plan_markdown?: string }
       | undefined;
     if (pendingPlan?.approval_id) {
-      await forwardToAttachedTab({
+      await forwardToPanels({
         kind: "plan_approval",
         approvalId: pendingPlan.approval_id,
         planMarkdown: pendingPlan.plan_markdown ?? ""
@@ -457,7 +534,7 @@ async function handleSocketFrame(raw: unknown): Promise<void> {
     for (const envelope of events) {
       const event = normalizeEvent(envelope);
       if (event) {
-        await forwardToAttachedTab(event);
+        await forwardToPanels(event);
       }
     }
     if (typeof highWater === "number" && socketState.desiredConnectionId) {
@@ -476,7 +553,7 @@ async function handleSocketFrame(raw: unknown): Promise<void> {
     }
     const event = normalizeEvent(envelope);
     if (event) {
-      await forwardToAttachedTab(event);
+      await forwardToPanels(event);
     }
     return;
   }
@@ -485,7 +562,7 @@ async function handleSocketFrame(raw: unknown): Promise<void> {
     const reason = String(frame.reason ?? "");
     if (reason === "connection_gone") {
       await saveConnection(null);
-      await forwardToAttachedTab({
+      await forwardToPanels({
         kind: "error",
         message: "Codeg 连接已被服务端回收，下次发送时会自动重连。"
       });
@@ -590,7 +667,8 @@ function toRuntime(config: BridgeConfig, record: ConnectionRecord): BridgeRuntim
     config,
     connectionId: record.connectionId,
     agentType: record.agentType,
-    workingDir: record.workingDir
+    workingDir: record.workingDir,
+    conversationId: record.conversationId
   };
 }
 
@@ -603,10 +681,10 @@ async function applyRequest(
 ): Promise<RuntimeResponse> {
   const config = await getConfig();
   if (!hasEndpoint(config)) {
-    return { ok: false, error: "请先在扩展 popup 中配置 Codeg 地址与 Token" };
+    return { ok: false, error: "请先在扩展侧边栏中配置 Codeg 地址与 Token" };
   }
   if (!config.project?.folderPath) {
-    return { ok: false, error: "请先在 popup 中选择该项目对应的文件夹" };
+    return { ok: false, error: "请先在侧边栏中选择该项目对应的文件夹" };
   }
 
   const client = getClient(config);
@@ -663,10 +741,8 @@ async function applyRequest(
     }
   }
 
-  await chrome.storage.local.set({
-    [LAST_SELECTION_KEY]: { pageUrl, selection, sourceHint, prompt, requestId }
-  });
   void captureSessionIdentity(config, record.connectionId);
+  await broadcastState();
   return { ok: true, requestId, runtime: toRuntime(config, record) };
 }
 
@@ -697,9 +773,14 @@ async function handleAttachPage(
     await chrome.storage.local.set({ [TAB_ID_KEY]: tabId, [PAGE_URL_KEY]: pageUrl });
     await saveOriginPref(pageUrl, config);
     await ensureContentScript(tabId);
-    // An already-injected content script only learns about the new connection
-    // when told; a fresh injection reloads the runtime by itself at boot.
-    void chrome.tabs.sendMessage(tabId, { type: MESSAGE_TYPES.contentRefreshRuntime }).catch(() => {});
+    // Freshly bound tab starts in the stored selection mode (on by default).
+    const stored = await chrome.storage.local.get(SELECTING_KEY);
+    if (stored[SELECTING_KEY] !== false) {
+      void chrome.tabs
+        .sendMessage(tabId, { type: MESSAGE_TYPES.contentSetSelecting, selecting: true })
+        .catch(() => undefined);
+    }
+    await broadcastState();
 
     return {
       ok: true,
@@ -769,8 +850,7 @@ async function handleLoadCodegInfo(): Promise<RuntimeResponse> {
   }
 }
 
-async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.MessageSender): Promise<RuntimeResponse> {
-  const senderTabId = sender?.tab?.id;
+async function handleMessage(message: RuntimeRequest): Promise<RuntimeResponse> {
   const attachedTabId = await getAttachedTabId();
   const attachedPageUrl = await getAttachedPageUrl();
 
@@ -807,60 +887,24 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
       return handleLoadCodegInfo();
     case MESSAGE_TYPES.popupAttachPage:
       return handleAttachPage(message.tabId, message.pageUrl, message.pageTitle);
-    case MESSAGE_TYPES.popupApplyCurrentSelection: {
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId: message.tabId },
-        func: () => {
-          const runtime = window as typeof window & {
-            __CODEG_UI_BRIDGE_LAST_SELECTION__?: {
-              pageUrl: string;
-              selection: ContentSelection;
-              sourceHint?: ContentSourceHint;
-            };
-          };
-          return runtime.__CODEG_UI_BRIDGE_LAST_SELECTION__ || null;
-        }
-      });
-      const current = result?.result as {
-        pageUrl: string;
-        selection: ContentSelection;
-        sourceHint?: ContentSourceHint;
-      } | null;
-      if (!current?.selection) {
-        return {
-          ok: false,
-          error: "No current selection found on this page. Select an element first."
-        };
+    case MESSAGE_TYPES.contentSetSelecting: {
+      await chrome.storage.local.set({ [SELECTING_KEY]: message.selecting });
+      if (attachedTabId != null) {
+        void chrome.tabs
+          .sendMessage(attachedTabId, { type: MESSAGE_TYPES.contentSetSelecting, selecting: message.selecting })
+          .catch(() => undefined);
       }
-      return applyRequest(current.pageUrl, current.selection, message.prompt, current.sourceHint);
-    }
-    case MESSAGE_TYPES.contentGetRuntime: {
-      const config = await getConfig();
-      const record = await getConnection();
-      if (record && hasEndpoint(config)) {
-        // Re-arm the stream subscription so the panel keeps receiving events
-        // after a service worker restart dropped the socket.
-        attachConnectionStream(record.connectionId);
-      }
-      return {
-        ok: true,
-        runtime: record && hasEndpoint(config) ? toRuntime(config, record) : undefined,
-        connectionId: record?.connectionId,
-        attachedPageUrl: attachedPageUrl || undefined,
-        attachedTabId: attachedTabId ?? undefined,
-        requestTabId: senderTabId,
-        isCurrentTabAttached: attachedTabId != null && senderTabId != null ? attachedTabId === senderTabId : undefined
-      };
+      await broadcastState();
+      return { ok: true };
     }
     case MESSAGE_TYPES.contentSelectionSync: {
-      await chrome.storage.local.set({
-        [LAST_SELECTION_KEY]: {
-          pageUrl: message.pageUrl,
-          selection: message.selection,
-          sourceHint: message.sourceHint
-        }
+      await broadcastToPanels({
+        kind: "selection",
+        pageUrl: message.pageUrl,
+        selection: message.selection,
+        sourceHint: message.sourceHint
       });
-      return { ok: true, connected: Boolean(attachedTabId != null), attachedPageUrl };
+      return { ok: true };
     }
     case MESSAGE_TYPES.contentApply:
       return applyRequest(message.pageUrl, message.selection, message.prompt, message.sourceHint, message.extra);
@@ -909,8 +953,8 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
     case MESSAGE_TYPES.contentDisconnect: {
       detachConnectionStream();
       // Fully tear down: tell Codeg to end the ACP connection and clear the
-      // stored record, otherwise a page reload boots the panel again because
-      // contentGetRuntime still sees the stale connection.
+      // stored record, otherwise state broadcasts would keep claiming a live
+      // connection.
       const config = await getConfig();
       const record = await getConnection();
       if (record && hasEndpoint(config)) {
@@ -921,7 +965,8 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
         }
       }
       await saveConnection(null);
-      await chrome.storage.local.remove([TAB_ID_KEY, PAGE_URL_KEY, LAST_SELECTION_KEY]);
+      await chrome.storage.local.remove([TAB_ID_KEY, PAGE_URL_KEY, SELECTING_KEY]);
+      await broadcastState();
       return { ok: true, connected: false, attachedPageUrl: undefined, attachedTabId: undefined };
     }
     default:
@@ -930,7 +975,7 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
 }
 
 chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendResponse) => {
-  void handleMessage(message, sender)
+  void handleMessage(message)
     .then((response) => sendResponse(response))
     .catch((error) => {
       sendResponse({
@@ -940,4 +985,25 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendRespo
     });
 
   return true;
+});
+
+// The content script is passive after a page reload; re-apply the stored
+// selection mode so the user does not have to toggle it again.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== "complete") {
+    return;
+  }
+  void (async () => {
+    const attachedTabId = await getAttachedTabId();
+    if (tabId !== attachedTabId) {
+      return;
+    }
+    const result = await chrome.storage.local.get(SELECTING_KEY);
+    if (result[SELECTING_KEY] === true) {
+      void chrome.tabs
+        .sendMessage(tabId, { type: MESSAGE_TYPES.contentSetSelecting, selecting: true })
+        .catch(() => undefined);
+    }
+    await broadcastState();
+  })();
 });

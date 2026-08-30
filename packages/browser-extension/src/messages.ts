@@ -4,16 +4,17 @@ export const MESSAGE_TYPES = {
   popupTestConnection: "codeg/popup/test-connection",
   popupLoadCodegInfo: "codeg/popup/load-codeg-info",
   popupAttachPage: "codeg/popup/attach-page",
-  popupApplyCurrentSelection: "codeg/popup/apply-current-selection",
   contentGetRuntime: "codeg/content/get-runtime",
-  contentRefreshRuntime: "codeg/content/refresh-runtime",
+  contentSetSelecting: "codeg/content/set-selecting",
+  contentGetApplyContext: "codeg/content/get-apply-context",
   contentSelectionSync: "codeg/content/selection-sync",
   contentApply: "codeg/content/apply",
   contentCancelTurn: "codeg/content/cancel-turn",
   contentRespondRequest: "codeg/content/respond-request",
-  contentDisconnect: "codeg/content/disconnect",
-  contentAgentEvent: "codeg/content/agent-event"
+  contentDisconnect: "codeg/content/disconnect"
 } as const;
+
+export const SIDE_PANEL_PORT_NAME = "sidepanel";
 
 export type CodegProject = {
   folderId: number;
@@ -35,6 +36,7 @@ export type BridgeRuntime = {
   connectionId: string;
   agentType: string;
   workingDir: string;
+  conversationId?: number;
 };
 
 export type CodegAgentOption = {
@@ -74,6 +76,26 @@ export type AgentStreamEvent =
   | { kind: "question_resolved"; questionId: string }
   | { kind: "plan_approval"; approvalId: string; planMarkdown: string }
   | { kind: "plan_approval_resolved"; approvalId: string };
+
+/** Background → side panel pushes over the long-lived port. */
+export type PanelPortEvent =
+  | {
+      kind: "state";
+      connected: boolean;
+      selecting: boolean;
+      attachedTabId?: number;
+      attachedPageUrl?: string;
+      attachedTitle?: string;
+      attachedFavIconUrl?: string;
+      runtime?: BridgeRuntime;
+    }
+  | { kind: "event"; event: AgentStreamEvent }
+  | {
+      kind: "selection";
+      pageUrl: string;
+      selection: ContentSelection;
+      sourceHint?: ContentSourceHint;
+    };
 
 export type ContentSourceHint = {
   file?: string;
@@ -135,18 +157,22 @@ export type PopupAttachPageRequest = {
   pageTitle?: string;
 };
 
-export type PopupApplyCurrentSelectionRequest = {
-  type: typeof MESSAGE_TYPES.popupApplyCurrentSelection;
-  tabId: number;
-  prompt: string;
-};
-
 export type ContentGetRuntimeRequest = {
   type: typeof MESSAGE_TYPES.contentGetRuntime;
 };
 
-export type ContentRefreshRuntimeRequest = {
-  type: typeof MESSAGE_TYPES.contentRefreshRuntime;
+export type ContentSetSelectingRequest = {
+  type: typeof MESSAGE_TYPES.contentSetSelecting;
+  selecting: boolean;
+};
+
+/** Raw apply context collected by the content script in the page world. */
+export type ContentApplyContext = {
+  pageUrl: string;
+  selection: ContentSelection;
+  sourceHint?: ContentSourceHint;
+  computedStyle?: Record<string, string>;
+  consoleErrors?: ConsoleErrorEntry[];
 };
 
 export type ContentSelectionSyncRequest = {
@@ -182,20 +208,13 @@ export type ContentDisconnectRequest = {
   type: typeof MESSAGE_TYPES.contentDisconnect;
 };
 
-export type ContentAgentEventMessage = {
-  type: typeof MESSAGE_TYPES.contentAgentEvent;
-  event: AgentStreamEvent;
-};
-
 export type RuntimeRequest =
   | PopupSaveConfigRequest
   | PopupGetConfigRequest
   | PopupTestConnectionRequest
   | PopupLoadCodegInfoRequest
   | PopupAttachPageRequest
-  | PopupApplyCurrentSelectionRequest
-  | ContentGetRuntimeRequest
-  | ContentRefreshRuntimeRequest
+  | ContentSetSelectingRequest
   | ContentSelectionSyncRequest
   | ContentApplyRequest
   | ContentCancelTurnRequest
@@ -211,8 +230,6 @@ export type RuntimeResponse = {
   connected?: boolean;
   attachedPageUrl?: string;
   attachedTabId?: number;
-  requestTabId?: number;
-  isCurrentTabAttached?: boolean;
   connectionId?: string;
   codegVersion?: string;
   agents?: CodegAgentOption[];

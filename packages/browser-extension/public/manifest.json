@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Codeg UI Bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Select page elements and send structured UI requests to local Codeg bridge",
-  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "sidePanel"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
@@ -16,8 +16,10 @@
       "all_frames": false
     }
   ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "action": {
-    "default_title": "Codeg UI Bridge",
-    "default_popup": "popup.html"
+    "default_title": "打开 Codeg Bridge 侧边栏"
   }
 }

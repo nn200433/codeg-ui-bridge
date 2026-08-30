@@ -56,6 +56,28 @@ export type CodegEventEnvelope = {
   type: string;
 } & Record<string, unknown>;
 
+/** Loose view of a conversation turn; only what the side panel renders.
+ *  Blocks from unlisted types (images, plans…) are kept via the catch-all. */
+export type CodegTurnBlock =
+  | { type: "text"; text?: string }
+  | { type: "thinking"; text?: string }
+  | { type: "tool_use"; tool_name?: string; input_preview?: string | null; status?: string | null }
+  | { type: "tool_result"; output_preview?: string | null; is_error?: boolean }
+  | ({ type: string } & Record<string, unknown>);
+
+export type CodegMessageTurn = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  blocks: CodegTurnBlock[];
+  timestamp?: string;
+  duration_ms?: number | null;
+  model?: string | null;
+};
+
+export type CodegConversationDetail = {
+  turns: CodegMessageTurn[];
+} & Record<string, unknown>;
+
 export class CodegApiError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -231,6 +253,14 @@ export class CodegClient {
 
   getSessionSnapshot(connectionId: string): Promise<CodegSessionSnapshot | null> {
     return this.command<CodegSessionSnapshot | null>("acp_get_session_snapshot", { connectionId });
+  }
+
+  /** Full transcript of a conversation (Codeg `get_conversation`). */
+  getConversation(agentType: string, conversationId: string | number): Promise<CodegConversationDetail> {
+    return this.command<CodegConversationDetail>("get_conversation", {
+      agentType,
+      conversationId: String(conversationId)
+    });
   }
 }
 

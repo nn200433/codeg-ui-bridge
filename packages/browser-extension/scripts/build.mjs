@@ -41,16 +41,16 @@ const buildTargets = [
     outfile: path.join(distDir, "background.js")
   },
   {
-    entryPoints: [path.join(packageRoot, "src/popup/main.ts")],
+    entryPoints: [path.join(packageRoot, "src/sidepanel/main.ts")],
     format: "iife",
-    outfile: path.join(distDir, "popup.js")
+    outfile: path.join(distDir, "sidepanel.js")
   }
 ];
 
 async function copyStaticFiles() {
   await mkdir(distDir, { recursive: true });
   await cp(path.join(publicDir, "manifest.json"), path.join(distDir, "manifest.json"));
-  await cp(path.join(publicDir, "popup.html"), path.join(distDir, "popup.html"));
+  await cp(path.join(publicDir, "sidepanel.html"), path.join(distDir, "sidepanel.html"));
 }
 
 async function runBuild() {
