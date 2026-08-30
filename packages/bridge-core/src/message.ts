@@ -1,64 +1,51 @@
 import type { ApplyRequest } from "./protocol";
 
-function quote(value: string | undefined): string {
-  return value && value.trim() ? value.trim() : "(none)";
-}
-
+/**
+ * Lean per-turn prompt: only non-empty fields, no JSON echo.
+ * The trailing "需求: " line is the marker extractIntent() in the side
+ * panel parses — keep the two in sync.
+ */
 export function buildBridgePrompt(payload: ApplyRequest): string {
   const { pageUrl, selection, intent, sourceHint } = payload;
+  const lines: string[] = ["[Codeg UI Bridge]"];
+  const field = (label: string, value: string | undefined | null): void => {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      lines.push(`${label}: ${trimmed}`);
+    }
+  };
 
-  const lines = [
-    "来自 Codeg UI Bridge 的页面改动请求。",
-    "",
-    "页面信息：",
-    `- URL: ${quote(pageUrl)}`,
-    "",
-    "选中元素：",
-    `- tag: ${quote(selection.tag)}`,
-    `- selector: ${quote(selection.selector)}`,
-    `- domPath: ${quote(selection.domPath)}`,
-    `- semanticPath: ${quote(selection.semanticPath)}`,
-    `- text: ${quote(selection.text)}`,
-    `- test attributes: ${selection.testAttributes?.join(", ") || "(none)"}`,
-    "",
-    "源码绑定：",
-    `- file: ${quote(sourceHint?.file)}`,
-    `- line: ${sourceHint?.line ?? "(none)"}`,
-    `- column: ${sourceHint?.column ?? "(none)"}`,
-    `- component: ${quote(sourceHint?.component)}`,
-    `- sourceId: ${quote(sourceHint?.sourceId)}`,
-    ...(payload.extra?.computedStyle
-      ? [
-          "",
-          "选中元素 computed style（节选）：",
-          ...Object.entries(payload.extra.computedStyle).map(([key, value]) => `- ${key}: ${value}`)
-        ]
-      : []),
-    ...(payload.extra?.consoleErrors?.length
-      ? [
-          "",
-          "页面控制台报错（最近）：",
-          ...payload.extra.consoleErrors.map(
-            (entry) =>
-              `- [${entry.level}] ${entry.message}${entry.source ? ` @ ${entry.source}${entry.line ? `:${entry.line}` : ""}` : ""}`
-          )
-        ]
-      : []),
-    "",
-    "用户需求：",
-    `- ${quote(intent.prompt)}`,
-    "",
-    "执行要求：",
-    "1. 先读取绑定文件及相关样式来源",
-    "2. 如果绑定文件不够，再追踪调用链",
-    "3. 做最小范围修改",
-    "4. 修改后总结变更文件和影响范围",
-    "",
-    "原始结构化数据：",
-    "```json",
-    JSON.stringify(payload, null, 2),
-    "```"
-  ];
+  field("页面", pageUrl);
+  // The selector already carries the tag when present, so one of the two suffices.
+  field("元素", selection.selector || selection.tag);
+  field("DOM", selection.domPath);
+  field("文本", selection.text);
+  if (selection.testAttributes?.length) {
+    field("测试属性", selection.testAttributes.join(", "));
+  }
+  if (sourceHint?.file) {
+    lines.push(`源码: ${sourceHint.file}${sourceHint.line ? `:${sourceHint.line}` : ""}`);
+  }
+  field("组件", sourceHint?.component);
+  field("sourceId", sourceHint?.sourceId);
+  if (payload.extra?.computedStyle) {
+    field(
+      "样式",
+      Object.entries(payload.extra.computedStyle)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join("; ")
+    );
+  }
+  for (const entry of payload.extra?.consoleErrors ?? []) {
+    lines.push(
+      `报错: [${entry.level}] ${entry.message}${entry.source ? ` @ ${entry.source}${entry.line ? `:${entry.line}` : ""}` : ""}`
+    );
+  }
 
+  lines.push(
+    "",
+    "要求：先读绑定源码，不足再追踪调用链；最小范围修改；完成后总结变更文件与影响范围。",
+    `需求: ${intent.prompt}`
+  );
   return lines.join("\n");
 }

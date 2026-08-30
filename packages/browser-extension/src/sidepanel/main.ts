@@ -406,8 +406,13 @@ function createCombo(box: HTMLElement, placeholder: string, onPick: (value: stri
   };
 }
 
-/** The user-facing intent lives between "用户需求：" and "执行要求：". */
+/** The user-facing intent follows the trailing "需求: " marker (legacy format falls back to the old regex). */
 function extractIntent(fullText: string): string {
+  const marker = "\n需求: ";
+  const idx = fullText.indexOf(marker);
+  if (idx >= 0) {
+    return fullText.slice(idx + marker.length).trim();
+  }
   const match = fullText.match(/用户需求：\n- ([\s\S]*?)(?=\n\n执行要求：)/);
   return match?.[1]?.trim() || fullText;
 }
