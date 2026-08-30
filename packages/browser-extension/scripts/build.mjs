@@ -36,6 +36,11 @@ const buildTargets = [
     outfile: path.join(distDir, "content.js")
   },
   {
+    entryPoints: [path.join(packageRoot, "src/probe.ts")],
+    format: "iife",
+    outfile: path.join(distDir, "probe.js")
+  },
+  {
     entryPoints: [path.join(packageRoot, "src/background.ts")],
     format: "iife",
     outfile: path.join(distDir, "background.js")

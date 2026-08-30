@@ -256,11 +256,17 @@ function getTestAttributeHints(element: HTMLElement): string[] {
 }
 
 function getSourceHint(element: HTMLElement): ContentSourceHint | undefined {
-  const file = element.getAttribute("data-codeg-source-file") || undefined;
-  const line = element.getAttribute("data-codeg-source-line") || undefined;
-  const column = element.getAttribute("data-codeg-source-column") || undefined;
-  const sourceId = element.getAttribute("data-codeg-source-id") || undefined;
-  const component = element.getAttribute("data-codeg-component") || undefined;
+  // Binder attributes land on template elements; walk up to the nearest
+  // instrumented ancestor when the clicked node itself carries none.
+  const host =
+    element.hasAttribute("data-codeg-source-id")
+      ? element
+      : (element.closest<HTMLElement>("[data-codeg-source-id]") ?? element);
+  const file = host.getAttribute("data-codeg-source-file") || undefined;
+  const line = host.getAttribute("data-codeg-source-line") || undefined;
+  const column = host.getAttribute("data-codeg-source-column") || undefined;
+  const sourceId = host.getAttribute("data-codeg-source-id") || undefined;
+  const component = host.getAttribute("data-codeg-component") || undefined;
 
   if (!file && !line && !column && !sourceId && !component) {
     return undefined;
@@ -273,6 +279,41 @@ function getSourceHint(element: HTMLElement): ContentSourceHint | undefined {
     column: column ? Number(column) : undefined,
     component
   };
+}
+
+const PROBE_EVENT = "codeg-source-probe";
+const PROBE_DONE_EVENT = "codeg-source-probe-done";
+const PROBE_TOKEN_ATTR = "data-codeg-probe-token";
+const PROBE_TIMEOUT_MS = 300;
+
+/**
+ * No binder attributes on the node? Ask the MAIN-world probe (probe.js) to
+ * fill data-codeg-source-* from Vue dev runtime props. Resolves true when a
+ * file attribute appeared.
+ */
+function probeSourceHint(element: HTMLElement): Promise<boolean> {
+  return new Promise((resolve) => {
+    const token = `probe-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.removeEventListener(PROBE_DONE_EVENT, onDone);
+      element.removeAttribute(PROBE_TOKEN_ATTR);
+      resolve(element.getAttribute("data-codeg-source-file") != null);
+    };
+    const onDone = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === token) {
+        finish();
+      }
+    };
+    window.addEventListener(PROBE_DONE_EVENT, onDone);
+    element.setAttribute(PROBE_TOKEN_ATTR, token);
+    window.dispatchEvent(new CustomEvent(PROBE_EVENT, { detail: token }));
+    setTimeout(finish, PROBE_TIMEOUT_MS);
+  });
 }
 
 function toSelection(element: HTMLElement): ContentSelection {
@@ -459,12 +500,29 @@ function selectElement(element: HTMLElement) {
   state.selecting = false;
   syncFrames();
 
-  void safeSendMessage<RuntimeResponse>({
-    type: MESSAGE_TYPES.contentSelectionSync,
-    pageUrl: window.location.href,
-    selection: state.selectedSelection,
-    sourceHint: state.selectedSourceHint
-  });
+  const syncSelection = () => {
+    void safeSendMessage<RuntimeResponse>({
+      type: MESSAGE_TYPES.contentSelectionSync,
+      pageUrl: window.location.href,
+      selection: state.selectedSelection,
+      sourceHint: state.selectedSourceHint
+    });
+  };
+  syncSelection();
+
+  if (!state.selectedSourceHint) {
+    // Vite/webpack binder absent: fall back to the Vue dev runtime probe for
+    // file-level binding, then push the enriched hint to the panel.
+    void probeSourceHint(promoted).then((found) => {
+      if (!found || state.selectedElement !== promoted) {
+        return;
+      }
+      state.selectedSourceHint = getSourceHint(promoted);
+      if (state.selectedSourceHint) {
+        syncSelection();
+      }
+    });
+  }
 }
 
 function handleHover(target: EventTarget | null) {

@@ -1,0 +1,13 @@
+{
+  "name": "@codeg-ui-bridge/source-binder-vue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "magic-string": "^0.30.18"
+  }
+}

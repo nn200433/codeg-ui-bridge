@@ -61,6 +61,7 @@ claude_code / codex / gemini / ... 任意 Agent CLI
 packages/bridge-core          Codeg HTTP/WS 客户端封装 + prompt 构建 + 协议类型
 packages/browser-extension    Chrome 扩展（sidepanel / background / content 选择器）
 packages/source-binder-react  Vite 插件，为 JSX 元素注入源码定位属性
+packages/source-binder-vue    Vite 插件，为 .vue 模板元素注入源码定位属性（Vue 2/3 通用）
 packages/ui-runtime           预留：DOM 扫描与运行时模型
 packages/intent-engine        预留：move / resize / describe 意图模型
 examples/react-vite-demo      可运行的 React 演示项目
@@ -130,15 +131,14 @@ pnpm build:browser-extension
 
 ## 源码绑定
 
-React + Vite 项目接入 [`packages/source-binder-react`](./packages/source-binder-react) 后，开发模式下每个 JSX 元素会带上：
+**零配置（默认启用）**：扩展会向页面注入一个 MAIN world 探针（`probe.js`）。Vue 的 dev 构建会把组件身份挂在 DOM 上（Vue 3 的 `__vueParentComponent` / Vue 2 的 `__vue__`），点选元素时探针沿 DOM 向上找到最近组件，自动回填源码文件与组件名——**Vue 2/3 通用、不限构建工具（Vite/webpack 均可）、项目零改动**，文件级定位。仅 dev 模式页面有效。
 
-- `data-codeg-source-id`
-- `data-codeg-source-file`
-- `data-codeg-source-line`
-- `data-codeg-source-column`
-- `data-codeg-component`
+**行级精度（可选）**：需要精确到行号时再接入 binder 插件，注入五个 `data-codeg-*` 属性后自动覆盖探针结果：
 
-选中元素后，发送给智能体的请求会自动包含 `sourceHint`（文件、行号、组件名），智能体可以精确定位源码；面板选中卡也会显示 `file:line`。使用方式见 [source-binder-react README](./packages/source-binder-react/README.md)。
+- React + Vite：[`packages/source-binder-react`](./packages/source-binder-react)
+- Vue 2/Vue 3 + Vite：[`packages/source-binder-vue`](./packages/source-binder-vue)
+
+选中元素后，发送给智能体的请求会自动包含 `sourceHint`（文件、行号、组件名），智能体可以精确定位源码；面板选中卡也会显示 `file:line`。
 
 ## 本地演示
 
