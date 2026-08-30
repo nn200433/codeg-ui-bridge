@@ -908,6 +908,19 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
     }
     case MESSAGE_TYPES.contentDisconnect: {
       detachConnectionStream();
+      // Fully tear down: tell Codeg to end the ACP connection and clear the
+      // stored record, otherwise a page reload boots the panel again because
+      // contentGetRuntime still sees the stale connection.
+      const config = await getConfig();
+      const record = await getConnection();
+      if (record && hasEndpoint(config)) {
+        try {
+          await getClient(config).disconnect(record.connectionId);
+        } catch {
+          // Best effort: Codeg may already be gone; clear the record anyway.
+        }
+      }
+      await saveConnection(null);
       await chrome.storage.local.remove([TAB_ID_KEY, PAGE_URL_KEY, LAST_SELECTION_KEY]);
       return { ok: true, connected: false, attachedPageUrl: undefined, attachedTabId: undefined };
     }
