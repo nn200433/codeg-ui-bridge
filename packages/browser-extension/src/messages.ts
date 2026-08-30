@@ -83,6 +83,18 @@ export type ContentSourceHint = {
   sourceId?: string;
 };
 
+export type ConsoleErrorEntry = {
+  level: string;
+  message: string;
+  source?: string;
+  line?: number;
+};
+
+export type ApplyExtra = {
+  computedStyle?: Record<string, string>;
+  consoleErrors?: ConsoleErrorEntry[];
+};
+
 export type ContentSelection = {
   tag: string;
   selector?: string;
@@ -150,6 +162,7 @@ export type ContentApplyRequest = {
   selection: ContentSelection;
   sourceHint?: ContentSourceHint;
   prompt: string;
+  extra?: ApplyExtra;
 };
 
 export type ContentCancelTurnRequest = {

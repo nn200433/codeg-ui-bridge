@@ -5,6 +5,7 @@ import {
   normalizeBaseUrl
 } from "@codeg-ui-bridge/bridge-core";
 import type {
+  ApplyExtra,
   ApplyRequest,
   CodegEventEnvelope,
   CodegSessionSnapshot
@@ -597,7 +598,8 @@ async function applyRequest(
   pageUrl: string,
   selection: ContentSelection,
   prompt: string,
-  sourceHint?: ContentSourceHint
+  sourceHint?: ContentSourceHint,
+  extra?: ApplyExtra
 ): Promise<RuntimeResponse> {
   const config = await getConfig();
   if (!hasEndpoint(config)) {
@@ -621,7 +623,8 @@ async function applyRequest(
     pageUrl,
     selection,
     intent: { type: "describe", prompt },
-    sourceHint
+    sourceHint,
+    extra
   };
   const requestId = `req-${Date.now()}`;
 
@@ -860,7 +863,7 @@ async function handleMessage(message: RuntimeRequest, sender?: chrome.runtime.Me
       return { ok: true, connected: Boolean(attachedTabId != null), attachedPageUrl };
     }
     case MESSAGE_TYPES.contentApply:
-      return applyRequest(message.pageUrl, message.selection, message.prompt, message.sourceHint);
+      return applyRequest(message.pageUrl, message.selection, message.prompt, message.sourceHint, message.extra);
     case MESSAGE_TYPES.contentCancelTurn: {
       const config = await getConfig();
       const record = await getConnection();

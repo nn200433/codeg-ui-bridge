@@ -1,6 +1,7 @@
 import { MESSAGE_TYPES } from "./messages";
 import type {
   AgentStreamEvent,
+  ApplyExtra,
   BridgeRuntime,
   CodegQuestionSpec,
   ContentAgentEventMessage,
@@ -40,6 +41,9 @@ type PanelState = {
   domModalOpen: boolean;
   composerOpen: boolean;
   childrenExpanded: boolean;
+  detailsOpen: boolean;
+  attachStyle: boolean;
+  attachErrors: boolean;
   promptDraft: string;
   statusText: string;
   runtime: BridgeRuntime | null;
@@ -164,7 +168,18 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     planApprove: "批准",
     planRequestChanges: "需修改",
     planAbandon: "放弃",
-    decline: "跳过"
+    decline: "跳过",
+    selectToggle: "选择元素",
+    pickHint: "点击页面任意元素，AI 将以它为上下文",
+    changePlaceholder: "描述你要的改动，或这里的问题…",
+    details: "详情",
+    copyLocate: "复制定位",
+    clearPick: "取消选中",
+    attachStyle: "附带元素样式",
+    attachErrors: "附带控制台报错",
+    openInPanel: "面板中展开",
+    noSourceBound: "未绑定源码",
+    inlineClose: "关闭"
   },
   "en-US": {
     title: "Codeg UI Bridge",
@@ -237,8 +252,32 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     planApprove: "Approve",
     planRequestChanges: "Request changes",
     planAbandon: "Abandon",
-    decline: "Skip"
+    decline: "Skip",
+    selectToggle: "Pick element",
+    pickHint: "Click any element on the page; AI will use it as context",
+    changePlaceholder: "Describe the change you want, or the problem here…",
+    details: "Details",
+    copyLocate: "Copy location",
+    clearPick: "Clear selection",
+    attachStyle: "Include element styles",
+    attachErrors: "Include console errors",
+    openInPanel: "Open in panel",
+    noSourceBound: "No source binding",
+    inlineClose: "Close"
   }
+};
+
+const PRESETS: Record<Locale, { label: string; text: string }[]> = {
+  "zh-CN": [
+    { label: "改样式", text: "请调整这个元素的样式：" },
+    { label: "对齐/间距", text: "这个元素的对齐/间距看起来不对，请检查并修正。" },
+    { label: "排查问题", text: "请排查这个元素的问题：结合它的样式、控制台报错和布局表现，给出结论与修复方案。" }
+  ],
+  "en-US": [
+    { label: "Restyle", text: "Please adjust the styles of this element: " },
+    { label: "Spacing", text: "The alignment/spacing of this element looks off. Please check and fix it." },
+    { label: "Diagnose", text: "Please diagnose this element: check its styles, console errors and layout, then give findings and a fix." }
+  ]
 };
 
 const CSS_TEXT = `
@@ -426,6 +465,14 @@ const CSS_TEXT = `
   color: #ffffff;
   border-color: transparent;
   box-shadow: 0 16px 28px rgba(37, 99, 235, 0.18);
+}
+.cuib-button--primary:disabled,
+.cuib-button--chip:disabled,
+.cuib-button--ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 .cuib-button--chip.is-active {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(59, 130, 246, 0.08));
@@ -741,6 +788,161 @@ const CSS_TEXT = `
   font-size: 12px;
   color: #94a3b8;
 }
+.cuib-select-toggle {
+  width: 100%;
+  min-height: 40px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.cuib-pick-card {
+  display: grid;
+  gap: 6px;
+}
+.cuib-pick-card--empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #64748b;
+  text-align: center;
+}
+.cuib-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cuib-pick-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.cuib-pick-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Fira Code", "PingFang SC", "Microsoft YaHei", "Consolas", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+.cuib-pick-file--none {
+  color: #94a3b8;
+}
+.cuib-icon-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+.cuib-icon-btn:hover {
+  border-color: rgba(37, 99, 235, 0.4);
+  color: #1d4ed8;
+}
+.cuib-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cuib-preset {
+  min-height: 26px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: #ffffff;
+  font: inherit;
+  font-size: 11px;
+  color: #475569;
+  cursor: pointer;
+}
+.cuib-preset:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.4);
+  color: #1d4ed8;
+}
+.cuib-preset:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cuib-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #475569;
+}
+.cuib-attach-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.cuib-attach-row input {
+  accent-color: #2563eb;
+  margin: 0;
+}
+.cuib-textarea:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+.cuib-details-toggle {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+  text-align: left;
+}
+.cuib-details-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.94);
+}
+.cuib-detail-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cuib-detail-row span {
+  color: #94a3b8;
+}
+.cuib-detail-row code {
+  word-break: break-all;
+  font-family: "Fira Code", "PingFang SC", "Microsoft YaHei", "Consolas", monospace;
+  font-size: 11px;
+  color: #334155;
+}
+.cuib-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cuib-details-actions .cuib-button--ghost {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 11px;
+}
 @media (max-width: 640px) {
   .cuib-panel,
   .cuib-modal,
@@ -1021,6 +1223,66 @@ function toSelection(element: HTMLElement): ContentSelection {
     testAttributes: getTestAttributeHints(element),
     rect: getRect(element)
   };
+}
+
+type ConsoleEntry = { level: string; message: string; source?: string; line?: number };
+
+const consoleEntries: ConsoleEntry[] = [];
+const CONSOLE_ENTRY_LIMIT = 20;
+
+function recordConsoleEntry(entry: ConsoleEntry): void {
+  consoleEntries.push(entry);
+  if (consoleEntries.length > CONSOLE_ENTRY_LIMIT) {
+    consoleEntries.shift();
+  }
+}
+
+const COMPUTED_STYLE_PROPS = [
+  "display",
+  "position",
+  "top",
+  "left",
+  "width",
+  "height",
+  "margin",
+  "padding",
+  "color",
+  "background-color",
+  "border",
+  "border-radius",
+  "font-size",
+  "font-weight",
+  "line-height",
+  "text-align",
+  "z-index",
+  "opacity",
+  "overflow",
+  "flex-direction",
+  "gap",
+  "box-shadow"
+];
+
+function collectComputedStyle(element: HTMLElement): Record<string, string> {
+  const style = window.getComputedStyle(element);
+  const result: Record<string, string> = {};
+  for (const prop of COMPUTED_STYLE_PROPS) {
+    const value = style.getPropertyValue(prop);
+    if (value) {
+      result[prop] = value;
+    }
+  }
+  return result;
+}
+
+function collectApplyExtra(state: PanelState): ApplyExtra {
+  const extra: ApplyExtra = {};
+  if (state.attachStyle && state.selectedElement) {
+    extra.computedStyle = collectComputedStyle(state.selectedElement);
+  }
+  if (state.attachErrors && consoleEntries.length > 0) {
+    extra.consoleErrors = consoleEntries.slice();
+  }
+  return extra;
 }
 
 function isInsideUi(event: Event): boolean {
@@ -1434,6 +1696,9 @@ async function boot() {
     domModalOpen: false,
     composerOpen: false,
     childrenExpanded: false,
+    detailsOpen: false,
+    attachStyle: true,
+    attachErrors: true,
     promptDraft: "",
     statusText: STRINGS[getInitialLocale()].waiting,
     runtime: null,
@@ -1541,13 +1806,42 @@ async function boot() {
             <span class="cuib-status-indicator ${state.runtime?.connectionId ? "connected" : "disconnected"}" data-codeg-ui-bridge-ui="true"></span>
           </div>
           <button id="cuibToggleSelect" class="cuib-toggle cuib-toggle--mini cuib-button--chip ${state.selecting ? "is-active" : ""}" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selecting ? "选择:开" : "选择:关")}</button>
-          <button id="cuibRefresh" class="cuib-toggle cuib-toggle--mini" data-codeg-ui-bridge-ui="true">刷新</button>
           ${state.runtime?.connectionId ? `<button id="cuibDisconnect" class="cuib-toggle cuib-toggle--mini" data-codeg-ui-bridge-ui="true">断开</button>` : ""}
           <button id="cuibToggleCollapse" class="cuib-toggle cuib-toggle--mini" data-codeg-ui-bridge-ui="true">展开</button>
           <button id="cuibClosePanel" class="cuib-toggle cuib-toggle--mini" aria-label="Close panel" data-codeg-ui-bridge-ui="true">×</button>
         </div>
       </div>
     `;
+
+    const hasSelection = Boolean(state.selectedElement && state.selectedSelection);
+    const selectionCard = hasSelection
+      ? `
+      <div class="cuib-card cuib-pick-card" data-codeg-ui-bridge-ui="true">
+        <div class="cuib-pick-row" data-codeg-ui-bridge-ui="true">
+          <strong class="cuib-pick-label" data-codeg-ui-bridge-ui="true">🎯 ${escapeHtml(getElementLabel(state.selectedElement!))}</strong>
+          <button id="cuibClearPick" class="cuib-icon-btn" title="${escapeHtml(t(state, "clearPick"))}" data-codeg-ui-bridge-ui="true">×</button>
+        </div>
+        <div class="cuib-pick-row" data-codeg-ui-bridge-ui="true">
+          <span class="cuib-pick-file${state.selectedSourceHint ? "" : " cuib-pick-file--none"}" data-codeg-ui-bridge-ui="true">📄 ${escapeHtml(state.selectedSourceHint ? sourceText : t(state, "noSourceBound"))}</span>
+          <button id="cuibCopyLocate" class="cuib-icon-btn" title="${escapeHtml(t(state, "copyLocate"))}" data-codeg-ui-bridge-ui="true">⧉</button>
+        </div>
+      </div>
+    `
+      : `
+      <div class="cuib-card cuib-pick-card cuib-pick-card--empty" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "pickHint"))}</div>
+    `;
+
+    const presetChips = PRESETS[state.locale]
+      .map(
+        (preset, index) =>
+          `<button class="cuib-preset" data-preset-index="${index}" ${hasSelection ? "" : "disabled"} data-codeg-ui-bridge-ui="true">${escapeHtml(preset.label)}</button>`
+      )
+      .join("");
+
+    const streamActive =
+      state.turnState !== "idle" ||
+      state.stream.length > 0 ||
+      Boolean(state.pendingPermission || state.pendingQuestion || state.pendingPlan);
 
     panel.innerHTML = state.collapsed ? collapsedHeader : `
       <div class="cuib-header" data-codeg-ui-bridge-ui="true">
@@ -1561,56 +1855,49 @@ async function boot() {
         </div>
         <div class="cuib-header-actions" data-codeg-ui-bridge-ui="true">
           ${state.runtime?.connectionId ? `<button id="cuibDisconnect" class="cuib-toggle" data-codeg-ui-bridge-ui="true">断开</button>` : ""}
-          <button id="cuibToggleLocale" class="cuib-toggle" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "locale"))}</button>
           <button id="cuibToggleCollapse" class="cuib-toggle" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "collapse"))}</button>
           <button id="cuibClosePanel" class="cuib-toggle" aria-label="Close panel" data-codeg-ui-bridge-ui="true">×</button>
         </div>
       </div>
       <div class="cuib-body" data-codeg-ui-bridge-ui="true">
-        <div class="cuib-toolbar" data-codeg-ui-bridge-ui="true">
-          <button id="cuibToggleSelect" class="cuib-button--chip ${state.selecting ? "is-active" : ""}" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selecting ? t(state, "selectOn") : t(state, "selectOff"))}</button>
-          <button id="cuibRefresh" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "refresh"))}</button>
-        </div>
-        <section data-codeg-ui-bridge-ui="true">
-          <p class="cuib-section-label">${escapeHtml(t(state, "selection"))}</p>
-          <div class="cuib-card">
-            <strong>${state.selectedElement ? escapeHtml(getElementLabel(state.selectedElement)) : escapeHtml(t(state, "noSelection"))}</strong>
-            <p>${escapeHtml(`${t(state, "domPath")}: ${state.selectedSelection?.domPath || t(state, "noSource")}`)}</p>
-            <p>${escapeHtml(`${t(state, "semanticPath")}: ${state.selectedSelection?.semanticPath || t(state, "noSource")}`)}</p>
-            <p>${escapeHtml(`${t(state, "rect")}: ${state.selectedSelection?.rect ? `${state.selectedSelection.rect.x}, ${state.selectedSelection.rect.y}, ${state.selectedSelection.rect.width}×${state.selectedSelection.rect.height}` : t(state, "noSource")}`)}</p>
+        <button id="cuibToggleSelect" class="cuib-button--chip cuib-select-toggle ${state.selecting ? "is-active" : ""}" data-codeg-ui-bridge-ui="true">⬚ ${escapeHtml(t(state, "selectToggle"))}</button>
+        ${selectionCard}
+        <div data-codeg-ui-bridge-ui="true">
+          <textarea id="cuibPanelPrompt" class="cuib-textarea" ${hasSelection ? "" : "disabled"} placeholder="${escapeHtml(hasSelection ? t(state, "changePlaceholder") : t(state, "pickHint"))}" data-codeg-ui-bridge-ui="true">${escapeHtml(state.promptDraft)}</textarea>
+          <div class="cuib-presets" data-codeg-ui-bridge-ui="true">${presetChips}</div>
+          <div class="cuib-attach-row" data-codeg-ui-bridge-ui="true">
+            <label data-codeg-ui-bridge-ui="true"><input type="checkbox" id="cuibAttachStyle" ${state.attachStyle ? "checked" : ""} data-codeg-ui-bridge-ui="true" />${escapeHtml(t(state, "attachStyle"))}</label>
+            <label data-codeg-ui-bridge-ui="true"><input type="checkbox" id="cuibAttachErrors" ${state.attachErrors ? "checked" : ""} data-codeg-ui-bridge-ui="true" />${escapeHtml(t(state, "attachErrors"))}${consoleEntries.length ? ` (${consoleEntries.length})` : ""}</label>
           </div>
-        </section>
-        <section data-codeg-ui-bridge-ui="true">
-          <p class="cuib-section-label">${escapeHtml(t(state, "source"))}</p>
-          <div class="cuib-card">
-            <div class="cuib-source-chip">${escapeHtml(sourceText)}</div>
-            <p>${escapeHtml(`${t(state, "component")}: ${state.selectedSourceHint?.component || t(state, "noSource")}`)}</p>
-            <p>${escapeHtml(`${t(state, "sourceId")}: ${state.selectedSourceHint?.sourceId || t(state, "noSource")}`)}</p>
+          <div class="cuib-request-actions" data-codeg-ui-bridge-ui="true">
+            <button id="cuibPanelSend" class="cuib-button--primary" ${hasSelection ? "" : "disabled"} data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "send"))} ▶</button>
           </div>
-        </section>
-        <div class="cuib-actions" data-codeg-ui-bridge-ui="true">
-          <button id="cuibOpenDom" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
-          <button id="cuibLocateSource" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "locate"))}</button>
-          <button id="cuibCopySource" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "copySource"))}</button>
         </div>
-        <div class="cuib-secondary-actions" data-codeg-ui-bridge-ui="true">
-          <button id="cuibCopyJson" class="cuib-button" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "copyJson"))}</button>
-        </div>
-        <section data-codeg-ui-bridge-ui="true">
-          <p class="cuib-section-label">${escapeHtml(t(state, "request"))}</p>
-          <div class="cuib-card">
-            <textarea id="cuibPanelPrompt" class="cuib-textarea" data-codeg-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "promptPlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
-            <div class="cuib-request-actions" data-codeg-ui-bridge-ui="true">
-              <button id="cuibPanelSend" class="cuib-button--primary" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "send"))}</button>
-            </div>
-          </div>
-        </section>
-        <section data-codeg-ui-bridge-ui="true" id="cuibStreamSection">
+        <section id="cuibStreamSection" style="${streamActive ? "" : "display: none;"}" data-codeg-ui-bridge-ui="true">
           <div id="cuibStreamHead" class="cuib-stream-head" data-codeg-ui-bridge-ui="true">${buildStreamHeadMarkup(state)}</div>
           <div id="cuibPendingArea" style="display:grid; gap:8px;" data-codeg-ui-bridge-ui="true">${buildPendingMarkup(state)}</div>
           <div id="cuibStreamBody" class="cuib-stream-body" data-codeg-ui-bridge-ui="true">${buildStreamMarkup(state)}</div>
         </section>
-        <div class="cuib-status" data-codeg-ui-bridge-ui="true">${escapeHtml(state.statusText)}</div>
+        <div class="cuib-details" data-codeg-ui-bridge-ui="true">
+          <button id="cuibToggleDetails" class="cuib-button--ghost cuib-details-toggle" data-codeg-ui-bridge-ui="true">${state.detailsOpen ? "▾" : "▸"} ${escapeHtml(t(state, "details"))}</button>
+          ${
+            state.detailsOpen
+              ? `<div class="cuib-details-body" data-codeg-ui-bridge-ui="true">
+            <div class="cuib-detail-row" data-codeg-ui-bridge-ui="true"><span>${escapeHtml(t(state, "domPath"))}</span><code>${escapeHtml(state.selectedSelection?.domPath || t(state, "noSource"))}</code></div>
+            <div class="cuib-detail-row" data-codeg-ui-bridge-ui="true"><span>${escapeHtml(t(state, "semanticPath"))}</span><code>${escapeHtml(state.selectedSelection?.semanticPath || t(state, "noSource"))}</code></div>
+            <div class="cuib-detail-row" data-codeg-ui-bridge-ui="true"><span>${escapeHtml(t(state, "rect"))}</span><code>${escapeHtml(state.selectedSelection?.rect ? `${state.selectedSelection.rect.x}, ${state.selectedSelection.rect.y}, ${state.selectedSelection.rect.width}×${state.selectedSelection.rect.height}` : t(state, "noSource"))}</code></div>
+            <div class="cuib-detail-row" data-codeg-ui-bridge-ui="true"><span>${escapeHtml(t(state, "component"))}</span><code>${escapeHtml(state.selectedSourceHint?.component || t(state, "noSource"))}</code></div>
+            <div class="cuib-detail-row" data-codeg-ui-bridge-ui="true"><span>${escapeHtml(t(state, "sourceId"))}</span><code>${escapeHtml(state.selectedSourceHint?.sourceId || t(state, "noSource"))}</code></div>
+            <div class="cuib-details-actions" data-codeg-ui-bridge-ui="true">
+              <button id="cuibOpenDom" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
+              <button id="cuibCopyJson" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "copyJson"))}</button>
+              <button id="cuibToggleLocale" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "locale"))}</button>
+              <button id="cuibRefresh" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "refresh"))}</button>
+            </div>
+          </div>`
+              : ""
+          }
+        </div>
       </div>
     `;
 
@@ -1621,9 +1908,12 @@ async function boot() {
     const refreshButton = panel.querySelector<HTMLButtonElement>("#cuibRefresh");
     const closePanelButton = panel.querySelector<HTMLButtonElement>("#cuibClosePanel");
     const openDomButton = panel.querySelector<HTMLButtonElement>("#cuibOpenDom");
-    const locateSourceButton = panel.querySelector<HTMLButtonElement>("#cuibLocateSource");
-    const copySourceButton = panel.querySelector<HTMLButtonElement>("#cuibCopySource");
     const copyJsonButton = panel.querySelector<HTMLButtonElement>("#cuibCopyJson");
+    const clearPickButton = panel.querySelector<HTMLButtonElement>("#cuibClearPick");
+    const copyLocateButton = panel.querySelector<HTMLButtonElement>("#cuibCopyLocate");
+    const detailsToggleButton = panel.querySelector<HTMLButtonElement>("#cuibToggleDetails");
+    const attachStyleInput = panel.querySelector<HTMLInputElement>("#cuibAttachStyle");
+    const attachErrorsInput = panel.querySelector<HTMLInputElement>("#cuibAttachErrors");
     const panelPrompt = panel.querySelector<HTMLTextAreaElement>("#cuibPanelPrompt");
     const panelSendButton = panel.querySelector<HTMLButtonElement>("#cuibPanelSend");
 
@@ -1673,7 +1963,7 @@ async function boot() {
 
     refreshButton?.addEventListener("click", () => { void loadRuntime(); });
     openDomButton?.addEventListener("click", () => {
-      if (!state.selectedElement || !state.selecting) {
+      if (!state.selectedElement) {
         state.statusText = t(state, "noElement");
         renderAll();
         return;
@@ -1681,27 +1971,46 @@ async function boot() {
       state.domModalOpen = true;
       renderAll();
     });
-    locateSourceButton?.addEventListener("click", async () => {
-      if (!state.selectedSourceHint?.file && !state.selectedSourceHint?.sourceId) {
-        state.statusText = t(state, "sourceMissing");
-        renderAll();
-        return;
-      }
-      const text = state.selectedSourceHint.file ? `${state.selectedSourceHint.file}${state.selectedSourceHint.line ? `:${state.selectedSourceHint.line}` : ""}` : state.selectedSourceHint.sourceId || "";
-      await copyText(text);
-      state.statusText = `${t(state, "copiedLocate")}: ${text}`;
+    clearPickButton?.addEventListener("click", () => {
+      clearSelectionState(state);
+      state.statusText = t(state, "pickHint");
       renderAll();
     });
-    copySourceButton?.addEventListener("click", async () => {
-      const source = state.selectedSourceHint?.sourceId || state.selectedSourceHint?.file;
-      if (!source) {
+    copyLocateButton?.addEventListener("click", async () => {
+      const hint = state.selectedSourceHint;
+      const locate = hint?.file
+        ? `${hint.file}${hint.line ? `:${hint.line}` : ""}`
+        : hint?.sourceId || "";
+      if (!locate) {
         state.statusText = t(state, "sourceMissing");
         renderAll();
         return;
       }
-      await copyText(source);
-      state.statusText = `${t(state, "copiedSource")}: ${source}`;
+      const selector = state.selectedSelection?.selector;
+      await copyText(selector ? `${locate}\nselector: ${selector}` : locate);
+      state.statusText = `${t(state, "copiedLocate")}: ${locate}`;
       renderAll();
+    });
+    detailsToggleButton?.addEventListener("click", () => {
+      state.detailsOpen = !state.detailsOpen;
+      renderAll();
+    });
+    attachStyleInput?.addEventListener("change", () => {
+      state.attachStyle = attachStyleInput.checked;
+    });
+    attachErrorsInput?.addEventListener("change", () => {
+      state.attachErrors = attachErrorsInput.checked;
+    });
+    panel.querySelectorAll<HTMLButtonElement>(".cuib-preset").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const preset = PRESETS[state.locale][Number(chip.dataset.presetIndex ?? "-1")];
+        if (!preset || !panelPrompt) {
+          return;
+        }
+        state.promptDraft = preset.text;
+        panelPrompt.value = preset.text;
+        panelPrompt.focus();
+      });
     });
     copyJsonButton?.addEventListener("click", async () => {
       await copyText(buildSelectionJson(state.selectedSelection, state.selectedSourceHint));
@@ -1753,7 +2062,8 @@ async function boot() {
         pageUrl: window.location.href,
         selection: state.selectedSelection,
         sourceHint: state.selectedSourceHint,
-        prompt: promptText
+        prompt: promptText,
+        extra: collectApplyExtra(state)
       });
       if (!response.ok) {
         state.statusText = response.error || "Apply failed";
@@ -1883,7 +2193,7 @@ async function boot() {
   }
 
   function renderInlineComposer() {
-    if (!state.selectedElement || !state.selecting || !state.composerOpen) {
+    if (!state.selectedElement || !state.composerOpen) {
       inlineComposer.style.display = "none";
       return;
     }
@@ -1896,17 +2206,18 @@ async function boot() {
     inlineComposer.style.left = `${next.x}px`;
     inlineComposer.style.top = `${next.y}px`;
     inlineComposer.innerHTML = `
-      <div class="cuib-inline-title" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selectedElement ? getElementLabel(state.selectedElement) : t(state, "noSelection"))}</div>
-      <div class="cuib-inline-subtitle" data-codeg-ui-bridge-ui="true">${escapeHtml(state.selectedSourceHint?.file || state.selectedSourceHint?.sourceId || t(state, "noSource"))}</div>
-      <textarea id="cuibInlinePrompt" class="cuib-textarea" data-codeg-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "promptPlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
+      <div class="cuib-inline-title" data-codeg-ui-bridge-ui="true">🎯 ${escapeHtml(getElementLabel(state.selectedElement))}<button id="cuibInlineClose" class="cuib-icon-btn" title="${escapeHtml(t(state, "inlineClose"))}" data-codeg-ui-bridge-ui="true">×</button></div>
+      <div class="cuib-inline-subtitle" data-codeg-ui-bridge-ui="true">📄 ${escapeHtml(state.selectedSourceHint?.file || state.selectedSourceHint?.sourceId || t(state, "noSourceBound"))}</div>
+      <textarea id="cuibInlinePrompt" class="cuib-textarea" data-codeg-ui-bridge-ui="true" placeholder="${escapeHtml(t(state, "changePlaceholder"))}">${escapeHtml(state.promptDraft)}</textarea>
       <div class="cuib-inline-actions" data-codeg-ui-bridge-ui="true">
-        <button id="cuibInlineSend" class="cuib-button--primary" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "inlineSend"))}</button>
-        <button id="cuibInlineDom" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "dom"))}</button>
+        <button id="cuibInlinePanel" class="cuib-button--ghost" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "openInPanel"))}</button>
+        <button id="cuibInlineSend" class="cuib-button--primary" data-codeg-ui-bridge-ui="true">${escapeHtml(t(state, "send"))} ▶</button>
       </div>
     `;
     const prompt = inlineComposer.querySelector<HTMLTextAreaElement>("#cuibInlinePrompt");
     const sendButton = inlineComposer.querySelector<HTMLButtonElement>("#cuibInlineSend");
-    const domButton = inlineComposer.querySelector<HTMLButtonElement>("#cuibInlineDom");
+    const panelButton = inlineComposer.querySelector<HTMLButtonElement>("#cuibInlinePanel");
+    const closeButton = inlineComposer.querySelector<HTMLButtonElement>("#cuibInlineClose");
     window.requestAnimationFrame(() => {
       prompt?.focus();
       prompt?.setSelectionRange(prompt.value.length, prompt.value.length);
@@ -1930,9 +2241,17 @@ async function boot() {
     prompt?.addEventListener("focusin", (event) => {
       event.stopPropagation();
     });
-    domButton?.addEventListener("click", () => {
-      state.domModalOpen = true;
+    closeButton?.addEventListener("click", () => {
+      state.composerOpen = false;
       renderAll();
+    });
+    panelButton?.addEventListener("click", () => {
+      state.composerOpen = false;
+      state.collapsed = false;
+      renderAll();
+      window.requestAnimationFrame(() => {
+        panel.querySelector<HTMLTextAreaElement>("#cuibPanelPrompt")?.focus();
+      });
     });
     sendButton?.addEventListener("click", async () => {
       if (!state.runtime?.connectionId) {
@@ -1958,7 +2277,8 @@ async function boot() {
         pageUrl: window.location.href,
         selection: state.selectedSelection,
         sourceHint: state.selectedSourceHint,
-        prompt: promptText
+        prompt: promptText,
+        extra: collectApplyExtra(state)
       });
       if (!response.ok) {
         state.statusText = response.error || "Apply failed";
@@ -1966,6 +2286,7 @@ async function boot() {
         return;
       }
       state.promptDraft = "";
+      state.composerOpen = false;
       resetTurnState(state);
       state.statusText = `${t(state, "sentPrefix")}: ${response.requestId}`;
       renderAll();
@@ -2062,6 +2383,9 @@ async function boot() {
     state.selectedSourceHint = getSourceHint(promoted);
     state.hoveredElement = null;
     state.childrenExpanded = false;
+    // Auto-exit picking so follow-up page clicks don't silently re-target;
+    // the toggle chip re-enters selection mode.
+    state.selecting = false;
     state.composerOpen = true;
     state.statusText = t(state, "selectedRecorded");
     window.__CODEG_UI_BRIDGE_LAST_SELECTION__ = {
@@ -2296,6 +2620,26 @@ async function boot() {
       renderStream();
     }
     return false;
+  });
+
+  // Console capture: the page's own console.* calls are not visible from the
+  // isolated content world, but uncaught errors and rejections dispatch on
+  // window and are. ponytail: patch console in MAIN world only if raw
+  // console.error capture is ever needed.
+  window.addEventListener("error", (event) => {
+    recordConsoleEntry({
+      level: "error",
+      message: event.message || String(event.error || "unknown error"),
+      source: event.filename || undefined,
+      line: event.lineno || undefined
+    });
+  }, true);
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = (event as PromiseRejectionEvent).reason;
+    recordConsoleEntry({
+      level: "error",
+      message: `Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`
+    });
   });
 
   await loadRuntime();

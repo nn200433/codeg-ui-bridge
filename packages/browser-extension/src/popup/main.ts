@@ -22,7 +22,7 @@ type PopupState = {
 const CSS_TEXT = `
 * { box-sizing: border-box; margin: 0; }
 .wrap {
-  width: 400px; padding: 16px; display: grid; gap: 12px;
+  width: 480px; padding: 16px; display: grid; gap: 12px;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   background: #f8fafc; color: #0f172a;
 }

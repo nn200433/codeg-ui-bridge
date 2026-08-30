@@ -27,6 +27,23 @@ export function buildBridgePrompt(payload: ApplyRequest): string {
     `- column: ${sourceHint?.column ?? "(none)"}`,
     `- component: ${quote(sourceHint?.component)}`,
     `- sourceId: ${quote(sourceHint?.sourceId)}`,
+    ...(payload.extra?.computedStyle
+      ? [
+          "",
+          "选中元素 computed style（节选）：",
+          ...Object.entries(payload.extra.computedStyle).map(([key, value]) => `- ${key}: ${value}`)
+        ]
+      : []),
+    ...(payload.extra?.consoleErrors?.length
+      ? [
+          "",
+          "页面控制台报错（最近）：",
+          ...payload.extra.consoleErrors.map(
+            (entry) =>
+              `- [${entry.level}] ${entry.message}${entry.source ? ` @ ${entry.source}${entry.line ? `:${entry.line}` : ""}` : ""}`
+          )
+        ]
+      : []),
     "",
     "用户需求：",
     `- ${quote(intent.prompt)}`,

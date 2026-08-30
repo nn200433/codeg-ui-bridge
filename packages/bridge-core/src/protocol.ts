@@ -28,9 +28,23 @@ export type ApplyIntent = {
   prompt: string;
 };
 
+export type ConsoleErrorEntry = {
+  level: string;
+  message: string;
+  source?: string;
+  line?: number;
+};
+
+/** Optional page context attached on send to help the agent locate problems. */
+export type ApplyExtra = {
+  computedStyle?: Record<string, string>;
+  consoleErrors?: ConsoleErrorEntry[];
+};
+
 export type ApplyRequest = {
   pageUrl: string;
   selection: SelectionPayload;
   intent: ApplyIntent;
   sourceHint?: SourceHint;
+  extra?: ApplyExtra;
 };
