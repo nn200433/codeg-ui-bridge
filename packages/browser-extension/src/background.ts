@@ -261,17 +261,25 @@ function isDeadConnectionStatus(status: string): boolean {
 async function ensureConnection(config: BridgeConfig): Promise<ConnectionRecord> {
   const client = getClient(config);
   let record = await getConnection();
+  const workingDir = config.project?.folderPath || "";
 
   if (record) {
     const connections = await client.listConnections().catch(() => []);
     const alive = connections.find((item) => item.id === record!.connectionId);
     if (alive && !isDeadConnectionStatus(alive.status)) {
-      void client.touchConnection(record.connectionId).catch(() => undefined);
-      return record;
+      if (record.agentType === config.agentType && record.workingDir === workingDir) {
+        void client.touchConnection(record.connectionId).catch(() => undefined);
+        return record;
+      }
+      // The stored connection is alive but points at a different agent/folder
+      // (config changed since it was created); drop it so the reconnect below
+      // targets the current config instead of silently reusing the old agent.
+      void client.disconnect(record.connectionId).catch(() => undefined);
+      await saveConnection(null);
+      record = null;
     }
   }
 
-  const workingDir = config.project?.folderPath || "";
   const agentType = config.agentType;
   if (!agentType) {
     throw new Error("请先在侧边栏中选择智能体");
